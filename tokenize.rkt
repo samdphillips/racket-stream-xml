@@ -6,8 +6,25 @@
          (only-in racket/match
                   match
                   match-lambda)
-         data/integer-set)
+         data/integer-set
+         racket/contract)
 
+(provide
+ (contract-out [xml-token?   (-> any/c boolean?)]
+               [tokenize-xml (-> input-port? xml-token?)]
+
+               [struct char-data  ([text string?])]
+               [struct start-tag  ([closed? boolean?]
+                                   [name    string?]
+                                   [attrs   (listof attr?)])]
+               [struct end-tag    ([name string?])]
+               [struct attr       ([name  symbol?]
+                                   [value string?])]
+               [struct comment    ([content string?])]
+               [struct entity-ref ([name string?])]
+               [struct char-ref   ([value exact-nonnegative-integer?])]
+               [struct pi         ([target string?]
+                                   [data   string?])]))
 
 (struct char-data  (text)               #:transparent)
 (struct start-tag  (closed? name attrs) #:transparent)
@@ -18,6 +35,16 @@
 (struct entity-ref (name)               #:transparent)
 (struct char-ref   (value)              #:transparent)
 (struct pi         (target data)        #:transparent)
+
+(define (xml-token? x)
+  (or (char-data?  x)
+      (start-tag?  x)
+      (end-tag?    x)
+      (comment?    x)
+      (cdata?      x)
+      (entity-ref? x)
+      (char-ref?   x)
+      (pi?         x)))
 
 (define charset 
   (match-lambda
