@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/format
-                  ~a)
+                  ~a
+                  ~s)
          (only-in racket/match
                   match
                   match-lambda)
@@ -70,14 +71,26 @@
   (cond [(eof-object? c) #f]
         [else (member?  (char->integer c) cs)]))
 
-(define name-start-char? (peek-for-charset name-start-char))
-(define name-char?       (peek-for-charset name-char))
-(define space-char?      (peek-for-charset space-char))
+(define-syntax-rule (define-peeker name char-set)
+  (define name (procedure-rename (peek-for-charset char-set) 'name)))
+
+(define-peeker name-start-char? name-start-char)
+(define-peeker name-char?       name-char)
+(define-peeker space-char?      space-char)
+
+(define (expect-next name in #:chars [expected-ch* null] #:pred [expected-pred? #f])
+  (define pred?
+    (or expected-pred?
+        (peek-for-charset (%charset* expected-ch*))))
+  (unless (pred? in)
+    (define expected-name
+      (or (and expected-pred? (object-name expected-pred?))
+          (~s expected-ch*)))
+    (error name "expected one of ~a, got: ~s" expected-name (peek-char in))))
 
 (define (expect-char name expected in)
-  (define ch (read-char in))
-  (unless (char=? expected ch)
-    (error name "expected '~a', got: ~a" expected ch)))
+  (expect-next name in #:chars (list expected))
+  (void (read-char in)))
 
 (define (read-until pred? in [start 0])
   (let scan ([i start])
@@ -144,9 +157,7 @@
   (start-tag closed? name attrs))
 
 (define (read-name in)
-  (unless (name-start-char? in 0)
-    (error 'read-name "expected name start char, got: ~a"
-           (peek-char in)))
+  (expect-next 'read-name in #:pred name-start-char?)
   (read-until (lambda (i in) (not (name-char? in i))) in 1))
 
 (define (read-attrs in)
@@ -157,9 +168,7 @@
   (cond [(name-start-char? in)
          (define name (read-name in))
          (skip-space in)
-         (let ([c (read-char in)])
-           (unless (char=? #\= c)
-             (error 'read-attr "expected '=', got: ~a" c)))
+         (expect-char 'read-attr #\= in)
          (skip-space in)
          (define value (read-attr-value in))
          (attr name value)]
@@ -256,6 +265,11 @@
   (read-string 2 in)
   (pi target data))
 
+(define (tokenize-xml in)
+  (define c (peek-char in))
+  (or (and (eof-object? c) c)
+      (read-content in)))
+
 (module+ test
   (require rackunit
            (only-in racket/port call-with-input-string))
@@ -316,4 +330,42 @@
              "<?xml version=\"1.0\"?>"
              (pi "xml" "version=\"1.0\""))
 
+  (define doc #<<DOC
+<part number="1976">
+    <name>Windscreen Wiper</name>
+    <description>
+      The Windscreen wiper automatically removes rain from your
+      windscreen, if it should happen to splash there.  It has a rubber
+      <ref part="1977">blade</ref> which can be ordered separately if
+      you need to replace it.
+    </description>
+</part>
+DOC
+    )
+
+  (test-case "sample document"
+             (define tokens
+               (call-with-input-string doc
+                 (lambda (in)
+                   (for/list ([token (in-producer tokenize-xml eof-object? in)]) token))))
+             (check-equal?
+              tokens
+              (list
+               (start-tag #f "part" (list (attr "number" "1976")))
+               (char-data "\n    ")
+               (start-tag #f "name" '())
+               (char-data "Windscreen Wiper")
+               (end-tag "name")
+               (char-data "\n    ")
+               (start-tag #f "description" '())
+               (char-data
+                "\n      The Windscreen wiper automatically removes rain from your\n      windscreen, if it should happen to splash there.  It has a rubber\n      ")
+               (start-tag #f "ref" (list (attr "part" "1977")))
+               (char-data "blade")
+               (end-tag "ref")
+               (char-data
+                " which can be ordered separately if\n      you need to replace it.\n    ")
+               (end-tag "description")
+               (char-data "\n")
+               (end-tag "part"))))
   )
