@@ -12,13 +12,14 @@
 (provide
  (contract-out [xml-token?   (-> any/c boolean?)]
                [tokenize-xml (-> input-port? xml-token?)]
+               [read-attrs   (-> input-port? (listof attr?))]
 
                [struct char-data  ([text string?])]
                [struct start-tag  ([closed? boolean?]
                                    [name    string?]
                                    [attrs   (listof attr?)])]
                [struct end-tag    ([name string?])]
-               [struct attr       ([name  symbol?]
+               [struct attr       ([name  string?]
                                    [value string?])]
                [struct comment    ([content string?])]
                [struct entity-ref ([name string?])]
