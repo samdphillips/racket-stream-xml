@@ -11,8 +11,9 @@
 
 (provide
  (contract-out [xml-token?   (-> any/c boolean?)]
-               [tokenize-xml (-> input-port? xml-token?)]
                [read-attrs   (-> input-port? (listof attr?))]
+               [tokenize-xml (-> input-port? (or/c eof-object?
+                                                   xml-token?))]
 
                [struct char-data  ([text string?])]
                [struct start-tag  ([closed? boolean?]
