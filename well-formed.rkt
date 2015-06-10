@@ -106,16 +106,18 @@
          (unless (string=? name match-name)
            (wfc-error "element type match" match-name name))
          (yield token)]
-        [(and (start-tag #f name attrs) token)
+        [(start-tag _ _ attrs) (=> continue)
          (unless (unique-attributes? attrs)
            (wfc-error "unique attributes specified" attrs))
+         (continue)]
+        [(and (start-tag #f name attrs) token)
          (yield token)
          (scan-match name)
          (scan-match match-name)]
         [(and (start-tag #t _ attrs) token)
-         (unless (unique-attributes? attrs)
-           (wfc-error "unique attributes specified" attrs))
          (yield token)]
+        [(? eof-object?)
+         (wfc-error "document production violation" match-name eof)]
         [token
          (yield token)
          (scan-match match-name)]))
@@ -126,14 +128,14 @@
     ;;       [WFC: No < in Attribute Values]
     (define (scan-body)
       (match (next-token)
-        [(and (start-tag #f name attrs) token)
+        [(start-tag _ _ attrs) (=> continue)
          (unless (unique-attributes? attrs)
            (wfc-error "unique attributes specified" attrs))
+         (continue)]
+        [(and (start-tag #f name attrs) token)
          (yield token)
          (scan-match name)]
         [(and (start-tag #t _ attrs) token)
-         (unless (unique-attributes? attrs)
-           (wfc-error "unique attributes specified" attrs))
          (yield token)]
         [token
          (error 'wfc "expected start tag, got: ~a~%" token)]))
@@ -150,13 +152,30 @@
 (module+ test
   (require rackunit)
 
-  (define-syntax-rule (check-process/exn s pats ...)
-    (call-with-input-string s (lambda (in)
-                                (define next (make-wf-generator in))
-                                (check-match (next) pats) ...
-                                (check-exn exn:fail? (lambda () (next))))))
+  (define-syntax-rule (check-process/exn name s pats ...)
+    (test-case name
+      (call-with-input-string s
+        (lambda (in)
+          (define next (make-wf-generator in))
+          (check-match (next) pats) ...
+          (check-exn exn:fail?
+                     (lambda () (next)))))))
 
-  (check-process/exn "<?xml version='1.0' encoding='utf-8'?>  a <test></test>"
+  (check-process/exn "wfc: document production"
+                     "<?xml version='1.0' encoding='utf-8'?>  a <test></test>"
                      (pi "xml" "version='1.0' encoding='utf-8'"))
+  (check-process/exn "wfc: document production"
+                     "<test>"
+                     (start-tag #f "test" _))
+  (check-process/exn "wfc: document production"
+                     "<test><test>"
+                     (start-tag #f "test" _)
+                     (start-tag #f "test" _))
+
+  (check-process/exn "wfc: unique attributes"
+                     "<test a=\"1\" b=\"2\" a=\"3\">")
+  (check-process/exn "wfc: unique attributes"
+                     "<test><test a=\"1\" b=\"2\" a=\"3\">"
+                     (start-tag _ "test" _))
 
 )
