@@ -96,16 +96,26 @@
          (push-token! token)]))
 
     ;; [WFC: Element Type Match]
+    ;; TODO: [WFC: No External Entity References]
+    ;;       [WFC: Legal Character]
+    (define (scan-match match-name)
+      (scan-body (lambda ()
+                   (scan-match match-name))
+                 (lambda ()
+                   (wfc-error "document production violation" match-name eof))
+                 (lambda (name token continue)
+                   (unless (string=? name match-name)
+                     (wfc-error "element type match" match-name name))
+                   (yield token))
+                 (lambda (token)
+                   (yield token)
+                   (scan-match match-name))))
+
     ;; [WFC: Unique Att Spec]
     ;; TODO: [WFC: No External Entity References]
     ;;       [WFC: No < in Attribute Values]
-    ;;       [WFC: Legal Character]
-    (define (scan-match match-name)
+    (define (scan-body kont handle-eof handle-end-tag handle-other-token)
       (match (next-token)
-        [(and (end-tag name) token)
-         (unless (string=? name match-name)
-           (wfc-error "element type match" match-name name))
-         (yield token)]
         [(start-tag _ _ attrs) (=> continue)
          (unless (unique-attributes? attrs)
            (wfc-error "unique attributes specified" attrs))
@@ -113,35 +123,25 @@
         [(and (start-tag #f name attrs) token)
          (yield token)
          (scan-match name)
-         (scan-match match-name)]
+         (kont)]
         [(and (start-tag #t _ attrs) token)
-         (yield token)]
+         (yield token)
+         (kont)]
         [(? eof-object?)
-         (wfc-error "document production violation" match-name eof)]
+         (handle-eof)]
+        [(and (end-tag name) token) (=> continue)
+         (handle-end-tag name token continue)]
         [token
-         (yield token)
-         (scan-match match-name)]))
-
-    ;; [WFC: Unique Att Spec]
-    ;; [WFC: Single root element]
-    ;; TODO: [WFC: No External Entity References]
-    ;;       [WFC: No < in Attribute Values]
-    (define (scan-body)
-      (match (next-token)
-        [(start-tag _ _ attrs) (=> continue)
-         (unless (unique-attributes? attrs)
-           (wfc-error "unique attributes specified" attrs))
-         (continue)]
-        [(and (start-tag #f name attrs) token)
-         (yield token)
-         (scan-match name)]
-        [(and (start-tag #t _ attrs) token)
-         (yield token)]
-        [token
-         (error 'wfc "expected start tag, got: ~a~%" token)]))
+         (handle-other-token token)]))
 
     (scan-prolog)
-    (scan-body)
+    ;; [WFC: Single root element]
+    (scan-body void
+               (lambda ()
+                 (wfc-error "document production violation" eof))
+               (lambda (name token continue) (continue))
+               (lambda (token)
+                 (error 'wfc "expected start tag, got: ~a~%" token)))
     (scan-misc*)
 
     (match (next-token)
@@ -161,6 +161,14 @@
           (check-exn exn:fail?
                      (lambda () (next)))))))
 
+  (define-syntax-rule (check-process name s pats ...)
+    (test-case name
+      (call-with-input-string s
+        (lambda (in)
+          (define next (make-wf-generator in))
+          (check-match (next) pats) ...
+          (check-match (next) (? eof-object?))))))
+
   (check-process/exn "wfc: document production"
                      "<?xml version='1.0' encoding='utf-8'?>  a <test></test>"
                      (pi "xml" "version='1.0' encoding='utf-8'"))
@@ -178,4 +186,9 @@
                      "<test><test a=\"1\" b=\"2\" a=\"3\">"
                      (start-tag _ "test" _))
 
+  (check-process "doc1"
+                 "<test><a/></test>"
+                 (start-tag #f "test" null)
+                 (start-tag #t "a" null)
+                 (end-tag "test"))
 )
