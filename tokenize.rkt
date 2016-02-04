@@ -107,7 +107,10 @@
 (define-peeker name-char?       name-char)
 (define-peeker space-char?      space-char)
 
-(define (expect-next name in #:chars [expected-ch* null] #:pred [expected-pred? #f])
+(define (expect-next name
+                     in
+                     #:chars [expected-ch* null]
+                     #:pred [expected-pred? #f])
   (define pred?
     (or expected-pred?
         (peek-for-charset (%charset* expected-ch*))))
@@ -126,6 +129,7 @@
     (if (pred? i in)
         (read-string i in)
         (scan (add1 i)))))
+
 
 (define (read-content in)
   (define buf (peek-string 1024 0 in))
@@ -376,7 +380,8 @@ DOC
              (define tokens
                (call-with-input-string doc
                  (lambda (in)
-                   (for/list ([token (in-producer tokenize-xml eof-object? in)]) token))))
+                   (for/list ([token (in-port tokenize-xml in)])
+                     token))))
              (check-equal?
               tokens
               (list
@@ -388,12 +393,15 @@ DOC
                (char-data "\n    ")
                (start-tag #f "description" '())
                (char-data
-                "\n      The Windscreen wiper automatically removes rain from your\n      windscreen, if it should happen to splash there.  It has a rubber\n      ")
+                (~a "\n      The Windscreen wiper automatically removes rain "
+                    "from your\n      windscreen, if it should happen to "
+                    "splash there.  It has a rubber\n      "))
                (start-tag #f "ref" (list (attr "part" "1977")))
                (char-data "blade")
                (end-tag "ref")
                (char-data
-                " which can be ordered separately if\n      you need to replace it.\n    ")
+                (~a " which can be ordered separately if\n      you need to "
+                    "replace it.\n    "))
                (end-tag "description")
                (char-data "\n")
                (end-tag "part"))))
