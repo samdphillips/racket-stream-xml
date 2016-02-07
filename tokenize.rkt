@@ -4,8 +4,7 @@
                   ~a
                   ~s)
          (only-in racket/match
-                  match
-                  match-lambda)
+                  match)
          data/integer-set
          racket/contract)
 
@@ -48,11 +47,11 @@
       (char-ref?   x)
       (pi?         x)))
 
-(define charset 
-  (match-lambda
-    [(list s e) (make-range (char->integer s) 
-                            (char->integer e))]
-    [x          (make-range (char->integer x))]))
+(define (charset cx)
+  (cond
+    [(list? cx) (make-range (char->integer (car cx))
+                            (char->integer (cadr cx)))]
+    [(char? cx) (make-range (char->integer cx))]))
 
 (define (%charset* xs)
   (for/fold ([cs (make-range)]) ([r (in-list xs)])
@@ -107,6 +106,12 @@
 (define-peeker name-char?       name-char)
 (define-peeker space-char?      space-char)
 
+(define-syntax-rule (scan v e c ...)
+  (let ([v e])
+    (and (not (eof-object? v)) c ...)))
+
+(define (peek-string=? s i in)
+  (scan v (peek-string (string-length s) i in) (string=? s v)))
 (define (expect-next name
                      in
                      #:chars [expected-ch* null]
@@ -119,7 +124,6 @@
       (or (and expected-pred? (object-name expected-pred?))
           (~s expected-ch*)))
     (error name "expected one of ~a, got: ~s" expected-name (peek-char in))))
-
 (define (expect-char name expected in)
   (expect-next name in #:chars (list expected))
   (void (read-char in)))
@@ -146,20 +150,19 @@
 
 (define (read-special in)
   (define (ref?)
-    (char=? #\& (peek-char in)))
+    (scan v (peek-char in) (char=? #\& v)))
   (define (comment?)
-    (string=? (peek-string 4 0 in) "<!--"))
+    (peek-string=? "<!--" 0 in))
   (define (cdata?)
-    (string=? (peek-string 9 0 in)
-              "<![CDATA["))
+    (peek-string=? "<![CDATA[" 0 in))
   (define (pi?)
-    (string=? (peek-string 2 0 in)
-              "<?"))
+    (peek-string=? "<?" 0 in))
   (define (end-tag?)
-    (string=? (peek-string 2 0 in) "</"))
+    (peek-string=? "</" 0 in))
   (define (start-tag?)
-    (and (char=? #\< (peek-char in))
-         (name-start-char? in 1)))
+    (scan v (peek-char in)
+          (char=? #\< v)
+          (name-start-char? in 1)))
 
   (cond [(start-tag?) (read-start-tag in)]
         [(end-tag?)   (read-end-tag   in)]
@@ -168,10 +171,10 @@
         [(cdata?)     (read-cdata     in)]
         [(pi?)        (read-pi        in)]
         [else
-          (error 'read-special
-                 (~a "expected processing instruction, reference, "
-                     "comment, cdata, end tag, or start tag.  got: ~a")
-                 (peek-string 5 0 in))]))
+         (error 'read-special
+                (~a "expected processing instruction, reference, "
+                    "comment, cdata, end tag, or start tag.  got: ~a")
+                (peek-string 5 0 in))]))
 
 (define (skip-space in)
   (when (space-char? in)
@@ -184,7 +187,7 @@
   (define attrs (read-attrs in))
   (skip-space in)
   (define closed?
-    (cond [(char=? #\/ (peek-char in)) (read-char in) #t]
+    (cond [(scan v (peek-char in) (char=? #\/ v)) (read-char in) #t]
           [else #f]))
   (expect-char 'read-start-tag #\> in)
   (start-tag closed? name attrs))
@@ -217,7 +220,9 @@
 
   (define (read-value s i)
     (define c (peek-char in i))
-    (cond [(char=? c q)   (normalize
+    (cond [(eof-object? c) (error 'read-attr-value
+                                  "eof while reading attrvalue")]
+          [(char=? c q)   (normalize
                             (reverse (cons (read-string i in) s)))]
           [(char=? c #\<) (error 'read-attr-value
                                  "unescaped '<' in attrvalue")]
@@ -238,21 +243,21 @@
   (define (read-char-ref i base)
     (read-string i in)
     (char-ref
-      (string->number (read-until-semi) base)))
+      (string->number (read-until-semi 0) base)))
 
   (define (read-entity-ref)
     (read-char in)
-    (entity-ref (read-until-semi)))
+    (entity-ref (read-until-semi 0)))
 
-  (define (read-until-semi [i 0])
-    (if (char=? #\; (peek-char in i))
+  (define (read-until-semi i)
+    (if (scan v (peek-char in i) (char=? #\; v))
         (begin0 
           (read-string i in)
           (read-char in))
         (read-until-semi (add1 i))))
 
-  (cond [(string=? "&#x" (peek-string 3 0 in)) (read-char-ref 3 16)]
-        [(string=? "&#" (peek-string 2 0 in))  (read-char-ref 2 10)]
+  (cond [(peek-string=? "&#x" 0 in) (read-char-ref 3 16)]
+        [(peek-string=? "&#"  0 in) (read-char-ref 2 10)]
         [else (read-entity-ref)]))
 
 
@@ -265,7 +270,7 @@
 
 (define (read-comment in)
   (define (end-comment? i in)
-    (string=? "--" (peek-string 2 i in)))
+    (peek-string=? "--" i in))
 
   (read-string 4 in)
   (define content
@@ -277,7 +282,7 @@
 
 (define (read-cdata in)
   (define (end-cdata? i in)
-    (string=? "]]>" (peek-string 3 i in)))
+    (peek-string=? "]]>" i in))
 
   (read-string 9 in)
   (define content
@@ -288,7 +293,7 @@
 
 (define (read-pi in)
   (define (end-pi? i in)
-    (string=? "?>" (peek-string 2 i in)))
+    (peek-string=? "?>" i in))
 
   (read-string 2 in)
   (define target (read-name in))
