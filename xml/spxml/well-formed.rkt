@@ -8,7 +8,8 @@
                   set-member?)
          racket/generator
          racket/match
-         "tokenize.rkt")
+
+         xml/spxml/tokenize)
 
 (define wfc-error
   (case-lambda
