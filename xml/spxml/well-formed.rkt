@@ -6,10 +6,15 @@
                   set
                   set-add
                   set-member?)
+         racket/contract
          racket/generator
          racket/match
 
          xml/spxml/tokenize)
+
+(provide
+ (contract-out [make-wf-generator
+                (-> input-port? (-> (or/c eof-object? xml-token?)))]))
 
 (define wfc-error
   (case-lambda
