@@ -22,6 +22,7 @@
                [struct attr       ([name  string?]
                                    [value string?])]
                [struct comment    ([content string?])]
+               [struct cdata      ([content string?])]
                [struct entity-ref ([name string?])]
                [struct char-ref   ([value exact-nonnegative-integer?])]
                [struct pi         ([target string?]
