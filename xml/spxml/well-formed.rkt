@@ -85,8 +85,14 @@
         [token (push-token! token)])
       ;; Misc*
       (scan-misc*)
-      ;; skipping (doctypedecl Misc*)? for now.
-      )
+
+      ;; doctypedecl?
+      (match (next-token)
+        [(? doctype? token) (yield token)]
+        [token (push-token! token)])
+
+      ;; Misc*
+      (scan-misc*))
 
     ;; TODO: [WFC: Legal Character]
     (define (scan-misc*)

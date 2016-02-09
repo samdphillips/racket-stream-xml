@@ -5,6 +5,7 @@
 
          xml/spxml/tokenize)
 
+(provide make-sax-parser)
 
 #|
    make-sax-parser : (All (a)
@@ -13,7 +14,11 @@
                              #:start-tag  (a start-tag -> a)
                              #:end-tag    (a end-tag -> a)
                              #:comment    (a comment -> a)
-                             #:pi         (a pi -> a))
+                             #:cdata      (a cdata -> a)
+                             #:entity-ref (a entity-ref -> a)
+                             #:char-ref   (a char-ref -> a)
+                             #:pi         (a pi -> a)
+                             #:doctype    (a doctype -> a))
                             ((-> (U EOF Xml-Token)) a -> a))
 |#
 
@@ -26,7 +31,8 @@
                          #:cdata        [cdata-handler      ignore-token]
                          #:entity-ref   [entity-ref-handler ignore-token]
                          #:char-ref     [char-ref-handler   ignore-token]
-                         #:pi           [pi-handler         ignore-token])
+                         #:pi           [pi-handler         ignore-token]
+                         #:doctype      [doctype-handler    ignore-token])
   (lambda (gen doc)
     (for/fold ([doc doc]) ([tok (in-producer gen eof-object?)])
       (define handler
@@ -38,6 +44,7 @@
           [(? cdata?)      cdata-handler]
           [(? entity-ref?) entity-ref-handler]
           [(? char-ref?)   char-ref-handler]
-          [(? pi?)         pi-handler]))
+          [(? pi?)         pi-handler]
+          [(? doctype?)    doctype-handler]))
       (handler doc tok))))
 

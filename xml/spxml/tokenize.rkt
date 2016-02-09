@@ -26,7 +26,14 @@
                [struct entity-ref ([name string?])]
                [struct char-ref   ([value exact-nonnegative-integer?])]
                [struct pi         ([target string?]
-                                   [data   string?])]))
+                                   [data   string?])]
+               [struct doctype    ([name string?]
+                                   [external-id (or/c #f)]
+                                   [internal-subset (or/c #f string?)])]))
+
+(module+ test
+  (require rackunit
+           (only-in racket/port call-with-input-string)))
 
 (struct char-data  (text)               #:transparent)
 (struct start-tag  (closed? name attrs) #:transparent)
@@ -37,6 +44,9 @@
 (struct entity-ref (name)               #:transparent)
 (struct char-ref   (value)              #:transparent)
 (struct pi         (target data)        #:transparent)
+(struct doctype    (name
+                    external-id
+                    internal-subset)    #:transparent)
 
 (define (xml-token? x)
   (or (char-data?  x)
@@ -46,7 +56,8 @@
       (cdata?      x)
       (entity-ref? x)
       (char-ref?   x)
-      (pi?         x)))
+      (pi?         x)
+      (doctype?    x)))
 
 (define (charset cx)
   (cond
@@ -95,6 +106,17 @@
             #\u0d
             #\u0a))
 
+(define pubid-char
+  (charset* #\u20
+            #\uD
+            #\uA
+            (#\a #\z)
+            (#\A #\Z)
+            (#\0 #\9)
+            #\- #\( #\) #\+ #\, #\.
+            #\/ #\: #\= #\? #\; #\!
+            #\* #\# #\@ #\$ #\_ #\%))
+
 (define ((peek-for-charset cs) in [skip 0])
   (define c (peek-char in skip))
   (cond [(eof-object? c) #f]
@@ -113,6 +135,7 @@
 
 (define (peek-string=? s i in)
   (scan v (peek-string (string-length s) i in) (string=? s v)))
+
 (define (expect-next name
                      in
                      #:chars [expected-ch* null]
@@ -125,6 +148,7 @@
       (or (and expected-pred? (object-name expected-pred?))
           (~s expected-ch*)))
     (error name "expected one of ~a, got: ~s" expected-name (peek-char in))))
+
 (define (expect-char name expected in)
   (expect-next name in #:chars (list expected))
   (void (read-char in)))
@@ -158,6 +182,8 @@
     (peek-string=? "<![CDATA[" 0 in))
   (define (pi?)
     (peek-string=? "<?" 0 in))
+  (define (doctype?)
+    (peek-string=? "<!DOCTYPE" 0 in))
   (define (end-tag?)
     (peek-string=? "</" 0 in))
   (define (start-tag?)
@@ -171,6 +197,7 @@
         [(ref?)       (read-reference in)]
         [(cdata?)     (read-cdata     in)]
         [(pi?)        (read-pi        in)]
+        [(doctype?)   (read-doctype   in)]
         [else
          (error 'read-special
                 (~a "expected processing instruction, reference, "
@@ -196,6 +223,9 @@
 (define (read-name in)
   (expect-next 'read-name in #:pred name-start-char?)
   (read-until (lambda (i in) (not (name-char? in i))) in 1))
+
+(module+ test
+  (check-equal? (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส"))
 
 (define (read-attrs in)
   (for/list ([a (in-port read-attr in)]) a))
@@ -285,6 +315,7 @@
   (define (end-cdata? i in)
     (peek-string=? "]]>" i in))
 
+  ; <!CDATA[[
   (read-string 9 in)
   (define content
     (read-until end-cdata? in))
@@ -304,15 +335,52 @@
   (read-string 2 in)
   (pi target data))
 
+(define (read-doctype in)
+  ; <!DOCTYPE
+  (read-string 9 in)
+  (skip-space in)
+  (define doc-name (read-name in))
+  (skip-space in)
+  (define external-id
+    (cond
+      [(peek-string=? "SYSTEM" 0 in)
+       (error 'read-doctype "external-id SYSTEM not implemented")]
+      [(peek-string=? "PUBLIC" 0 in)
+       (error 'read-doctype "external-id PUBLIC not implemented")]
+      [else #f]))
+  (skip-space in)
+  (define internal-subset
+    (if (scan v (peek-char in 0) (char=? #\[ v))
+        (read-internal-subset in)
+        #f))
+  (skip-space in)
+  (expect-char 'read-doctype #\> in)
+  (doctype doc-name external-id internal-subset))
+
+(define (read-system-literal in)
+  (define q (read-char in))
+
+  (unless (or (char=? #\' q) (char=? #\" q))
+    (error 'read-system-literal "expected ' or \" got: ~a" q))
+
+  (begin0
+    (read-until (lambda (i in) (scan v (peek-char in i) (char=? q v))) in)
+    (read-char in)))
+
+(define (read-pubid-literal in) #f)
+
+(define (read-internal-subset in)
+  (read-char in)
+  (begin0
+    (read-until (lambda (i in) (scan v (peek-char in i) (char=? #\] v))) in)
+    (expect-char 'read-internal-subset #\] in)))
+
 (define (tokenize-xml in)
   (define c (peek-char in))
   (or (and (eof-object? c) c)
       (read-content in)))
 
 (module+ test
-  (require rackunit
-           (only-in racket/port call-with-input-string))
-  
   (define-syntax-rule (test-read description input-string expected ...)
     (test-case description
       (call-with-input-string input-string
