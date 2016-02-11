@@ -8,6 +8,8 @@
          data/integer-set
          racket/contract)
 
+(require unstable/debug)
+
 (provide
  (contract-out [xml-token?   (-> any/c boolean?)]
                [read-attrs   (-> input-port? (listof attr?))]
@@ -30,6 +32,28 @@
                [struct doctype    ([name string?]
                                    [external-id (or/c #f)]
                                    [internal-subset (or/c #f string?)])]))
+
+#;#;#;
+(require
+  (for-syntax racket/base)
+  (only-in racket/base
+           [peek-string -peek-string]
+           [peek-char   -peek-char]))
+
+(define-syntax peek-string
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ amount skip in) (identifier? #'skip)
+                          (raise-syntax-error 'peek-string "fix skip" stx)]
+      [(_ amount skip in) #'(-peek-string amount skip in)])))
+
+(define-syntax peek-char
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ in) #'(-peek-char in)]
+      [(_ in skip) (identifier? #'skip)
+                   (raise-syntax-error 'peek-char "fix skip" stx)]
+      [(_ in skip) #'(-peek-char in skip)])))
 
 (module+ test
   (require rackunit
@@ -118,7 +142,10 @@
             #\* #\# #\@ #\$ #\_ #\%))
 
 (define ((peek-for-charset cs) in [skip 0])
-  (define c (peek-char in skip))
+  (define c
+    (cond [(string? in) (string-ref in skip)]
+          [(and (input-port? in) (zero? skip)) (peek-char in)]
+          [else (error 'peek-for-charset "can't read from: ~a" in)]))
   (cond [(eof-object? c) #f]
         [else (member?  (char->integer c) cs)]))
 
@@ -134,7 +161,19 @@
     (and (not (eof-object? v)) c ...)))
 
 (define (peek-string=? s i in)
-  (scan v (peek-string (string-length s) i in) (string=? s v)))
+  (define peek
+    (cond [(and (input-port? in) (zero? i)) peek-string]
+          [(string? in) (lambda (amount start s)
+                          (substring s start (+ start amount)))]
+          [else
+           (error 'peek-string=? "expected string or input-port got: ~a" in)]))
+  (scan v (peek (string-length s) i in) (string=? s v)))
+
+(define (string-index s p*)
+  (for/or ([c (in-string s)]
+           [i (in-naturals)])
+    (for/or ([p (in-list p*)])
+      (and (char=? p c) i))))
 
 (define (expect-next name
                      in
@@ -154,19 +193,17 @@
   (void (read-char in)))
 
 (define (read-until pred? in [start 0])
-  (let scan ([i start])
-    (if (pred? i in)
-        (read-string i in)
-        (scan (add1 i)))))
-
+  (let scan-out ([amount 1024])
+    (let ([buf (peek-string amount 0 in)])
+      (let scan ([i start])
+        (cond
+          [(> i amount)  (scan-out (+ amount 1024))]
+          [(pred? i buf) (read-string i in)]
+          [else (scan (add1 i))])))))
 
 (define (read-content in)
   (define buf (peek-string 1024 0 in))
-  (define i
-    (for/or ([c (in-string buf)]
-             [i (in-naturals)])
-      (and (or (char=? c #\<) (char=? c #\&)) i)))
-
+  (define i (string-index buf '(#\< #\&)))
   (cond [(not i)   (char-data (read-string 1024 in))]
         [(zero? i) (read-special in)]
         [else
@@ -187,9 +224,9 @@
   (define (end-tag?)
     (peek-string=? "</" 0 in))
   (define (start-tag?)
-    (scan v (peek-char in)
-          (char=? #\< v)
-          (name-start-char? in 1)))
+    (define s (peek-string 2 0 in))
+    (and (char=? #\< (string-ref s 0))
+         (name-start-char? s 1)))
 
   (cond [(start-tag?) (read-start-tag in)]
         [(end-tag?)   (read-end-tag   in)]
@@ -222,10 +259,10 @@
 
 (define (read-name in)
   (expect-next 'read-name in #:pred name-start-char?)
-  (read-until (lambda (i in) (not (name-char? in i))) in 1))
+  (read-until (lambda (i buf) (not (name-char? buf i))) in 1))
 
 (module+ test
-  (check-equal? (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส"))
+  (check-equal? (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส์"))
 
 (define (read-attrs in)
   (for/list ([a (in-port read-attr in)]) a))
@@ -249,8 +286,15 @@
   (define (read-ref s)
     (read-value (cons (read-reference in) s) 0))
 
-  (define (read-value s i)
-    (define c (peek-char in i))
+  (define (read-value s [i 1024])
+    (define buf (peek-string i 0 in))
+    (define c
+      (if (eof-object? buf)
+          buf
+          (let ([j (string-index buf (list q #\< #\&))])
+            (debug buf)
+            (string-ref buf j))))
+
     (cond [(eof-object? c) (error 'read-attr-value
                                   "eof while reading attrvalue")]
           [(char=? c q)   (normalize
@@ -274,18 +318,16 @@
   (define (read-char-ref i base)
     (read-string i in)
     (char-ref
-      (string->number (read-until-semi 0) base)))
+      (string->number (read-until-semi) base)))
 
   (define (read-entity-ref)
     (read-char in)
-    (entity-ref (read-until-semi 0)))
+    (entity-ref (read-until-semi)))
 
-  (define (read-until-semi i)
-    (if (scan v (peek-char in i) (char=? #\; v))
-        (begin0 
-          (read-string i in)
-          (read-char in))
-        (read-until-semi (add1 i))))
+  (define (read-until-semi)
+    (begin0
+      (read-until (lambda (i buf) (char=? #\; (string-ref buf i))) in)
+      (read-char in)))
 
   (cond [(peek-string=? "&#x" 0 in) (read-char-ref 3 16)]
         [(peek-string=? "&#"  0 in) (read-char-ref 2 10)]
@@ -339,20 +381,28 @@
   ; <!DOCTYPE
   (read-string 9 in)
   (skip-space in)
-  (define doc-name (read-name in))
+  (define doc-name (debug #:name 'doc-name (read-name in)))
   (skip-space in)
   (define external-id
-    (cond
-      [(peek-string=? "SYSTEM" 0 in)
-       (error 'read-doctype "external-id SYSTEM not implemented")]
-      [(peek-string=? "PUBLIC" 0 in)
-       (error 'read-doctype "external-id PUBLIC not implemented")]
-      [else #f]))
+    (debug #:name 'external-id
+           (cond
+             [(peek-string=? "SYSTEM" 0 in)
+              (read-string 6 in)
+              (skip-space in)
+              (list 'SYSTEM (read-system-literal in))]
+             [(peek-string=? "PUBLIC" 0 in)
+              (read-string 6 in)
+              (skip-space in)
+              (define pubid (read-pubid-literal in))
+              (skip-space in)
+              (list 'PUBLIC pubid (read-system-literal in))]
+             [else #f])))
   (skip-space in)
   (define internal-subset
-    (if (scan v (peek-char in 0) (char=? #\[ v))
-        (read-internal-subset in)
-        #f))
+    (debug #:name 'internal-subset
+           (if (scan v (peek-char in 0) (char=? #\[ v))
+               (read-internal-subset in)
+               #f)))
   (skip-space in)
   (expect-char 'read-doctype #\> in)
   (doctype doc-name external-id internal-subset))
@@ -364,7 +414,7 @@
     (error 'read-system-literal "expected ' or \" got: ~a" q))
 
   (begin0
-    (read-until (lambda (i in) (scan v (peek-char in i) (char=? q v))) in)
+    (read-until (lambda (i buf) (scan v (string-ref buf i) (char=? q v))) in)
     (read-char in)))
 
 (define (read-pubid-literal in) #f)
@@ -372,7 +422,7 @@
 (define (read-internal-subset in)
   (read-char in)
   (begin0
-    (read-until (lambda (i in) (scan v (peek-char in i) (char=? #\] v))) in)
+    (read-until (lambda (i buf) (scan v (string-ref buf i) (char=? #\] v))) in)
     (expect-char 'read-internal-subset #\] in)))
 
 (define (tokenize-xml in)
