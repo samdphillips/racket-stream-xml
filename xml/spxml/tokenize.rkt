@@ -12,7 +12,9 @@
 
 (provide
  (contract-out [xml-token?   (-> any/c boolean?)]
+
                [read-attrs   (-> input-port? (listof attr?))]
+
                [tokenize-xml (-> input-port? (or/c eof-object?
                                                    xml-token?))]
 
@@ -29,31 +31,10 @@
                [struct char-ref   ([value exact-nonnegative-integer?])]
                [struct pi         ([target string?]
                                    [data   string?])]
-               [struct doctype    ([name string?]
+               [struct doctype    ([name        string?]
                                    [external-id (or/c #f)]
-                                   [internal-subset (or/c #f string?)])]))
-
-#;#;#;
-(require
-  (for-syntax racket/base)
-  (only-in racket/base
-           [peek-string -peek-string]
-           [peek-char   -peek-char]))
-
-(define-syntax peek-string
-  (lambda (stx)
-    (syntax-case stx ()
-      [(_ amount skip in) (identifier? #'skip)
-                          (raise-syntax-error 'peek-string "fix skip" stx)]
-      [(_ amount skip in) #'(-peek-string amount skip in)])))
-
-(define-syntax peek-char
-  (lambda (stx)
-    (syntax-case stx ()
-      [(_ in) #'(-peek-char in)]
-      [(_ in skip) (identifier? #'skip)
-                   (raise-syntax-error 'peek-char "fix skip" stx)]
-      [(_ in skip) #'(-peek-char in skip)])))
+                                   [internal-subset
+                                    (or/c #f string?)])]))
 
 (module+ test
   (require rackunit
@@ -209,7 +190,6 @@
         [else
          (char-data (read-string i in))]))
 
-
 (define (read-special in)
   (define (ref?)
     (scan v (peek-char in) (char=? #\& v)))
@@ -262,7 +242,8 @@
   (read-until (lambda (i buf) (not (name-char? buf i))) in 1))
 
 (module+ test
-  (check-equal? (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส์"))
+  (check-equal?
+   (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส์"))
 
 (define (read-attrs in)
   (for/list ([a (in-port read-attr in)]) a))
