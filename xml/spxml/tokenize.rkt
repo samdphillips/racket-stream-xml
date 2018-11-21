@@ -438,8 +438,8 @@
   (define-syntax-rule (test-read description input-string expected ...)
     (test-case description
                (call-with-input-string input-string
-                                       (lambda (in)
-                                         (check-equal? (read-content in) expected) ...))))
+                 (lambda (in)
+                   (check-equal? (read-content in) expected) ...))))
 
   (test-read "char data" "hello world!" (char-data "hello world!"))
   (test-read "start tag" "<test>"       (start-tag #f "test" null))
@@ -507,9 +507,9 @@ DOC
   (test-case "sample document"
              (define tokens
                (call-with-input-string doc
-                                       (lambda (in)
-                                         (for/list ([token (in-port tokenize-xml in)])
-                                           token))))
+                 (lambda (in)
+                   (for/list ([token (in-port tokenize-xml in)])
+                     token))))
              (check-equal?
               tokens
               (list
