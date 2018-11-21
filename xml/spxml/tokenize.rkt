@@ -116,13 +116,13 @@
 
 (define name-char
   (union
-    name-start-char
-    (charset* #\.
-              #\-
-              (#\0 #\9)
-              #\uB7
-              (#\u0300 #\u036F)
-              (#\u203F #\u2040))))
+   name-start-char
+   (charset* #\.
+             #\-
+             (#\0 #\9)
+             #\uB7
+             (#\u0300 #\u036F)
+             (#\u203F #\u2040))))
 
 (define space-char
   (charset* #\u20
@@ -207,7 +207,7 @@
   (cond [(not i)   (char-data (read-string 1024 in))]
         [(zero? i) (read-special in)]
         [else
-          (char-data (read-string i in))]))
+         (char-data (read-string i in))]))
 
 
 (define (read-special in)
@@ -249,7 +249,7 @@
 (define (read-start-tag in)
   (read-char in)
   (define name  (read-name in))
-  (define attrs (read-attrs in))
+  (define attrs (read-attrs in))  
   (skip-space in)
   (define closed?
     (cond [(scan v (peek-char in) (char=? #\/ v)) (read-char in) #t]
@@ -288,21 +288,25 @@
 
   (define (read-value s [i 1024])
     (define buf (peek-string i 0 in))
-    (define c
-      (if (eof-object? buf)
-          buf
-          (let ([j (string-index buf (list q #\< #\&))])
-            (debug buf)
-            (string-ref buf j))))
+    (define-values (c j)
+      (cond
+        [(eof-object? buf) (values buf #f)]
+        [(string-index buf (list q #\< #\&))
+         => (λ (j) (values (string-ref buf j) j))]
+        [else
+         (values #f #f)]))
 
-    (cond [(eof-object? c) (error 'read-attr-value
-                                  "eof while reading attrvalue")]
-          [(char=? c q)   (normalize
-                            (reverse (cons (read-string i in) s)))]
-          [(char=? c #\<) (error 'read-attr-value
-                                 "unescaped '<' in attrvalue")]
-          [(char=? c #\&) (read-ref (cons (read-string i in) s))]
-          [else (read-value s (add1 i))]))
+    (match c
+      [(? eof-object?) (error 'read-attr-value
+                              "eof while reading attrvalue")]
+      [(and (? char?) (? (λ (c) (char=? c q))))
+       (normalize (reverse (cons (read-string j in) s)))]
+      [#\< (error 'read-attr-value "unescaped '<' in attrvalue")]
+      [#\& (read-ref (cons (read-string j in) s))]
+      [#f (if (< (string-length buf) i)
+              (error 'read-attr-value
+                     "eof while reading attrvalue")
+              (read-value s (add1 i)))]))
 
   (define (normalize v)
     (match v
@@ -318,7 +322,7 @@
   (define (read-char-ref i base)
     (read-string i in)
     (char-ref
-      (string->number (read-until-semi) base)))
+     (string->number (read-until-semi) base)))
 
   (define (read-entity-ref)
     (read-char in)
@@ -433,9 +437,9 @@
 (module+ test
   (define-syntax-rule (test-read description input-string expected ...)
     (test-case description
-      (call-with-input-string input-string
-        (lambda (in)
-          (check-equal? (read-content in) expected) ...))))
+               (call-with-input-string input-string
+                                       (lambda (in)
+                                         (check-equal? (read-content in) expected) ...))))
 
   (test-read "char data" "hello world!" (char-data "hello world!"))
   (test-read "start tag" "<test>"       (start-tag #f "test" null))
@@ -451,9 +455,9 @@
   (test-read "start tag with reference attributes" 
              "<test a='A &amp; B' b=\"&#34;\">"
              (start-tag #f "test" (list (attr "a" (list "A "
-                                                       (entity-ref "amp") 
-                                                       " B"))
-                                       (attr "b" (char-ref 34)))))
+                                                        (entity-ref "amp") 
+                                                        " B"))
+                                        (attr "b" (char-ref 34)))))
 
   (test-read "empty tag"
              "<test/>"
@@ -503,9 +507,9 @@ DOC
   (test-case "sample document"
              (define tokens
                (call-with-input-string doc
-                 (lambda (in)
-                   (for/list ([token (in-port tokenize-xml in)])
-                     token))))
+                                       (lambda (in)
+                                         (for/list ([token (in-port tokenize-xml in)])
+                                           token))))
              (check-equal?
               tokens
               (list
