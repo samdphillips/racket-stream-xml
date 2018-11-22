@@ -8,8 +8,6 @@
          data/integer-set
          racket/contract)
 
-(require unstable/debug)
-
 (provide
  (contract-out [xml-token?   (-> any/c boolean?)]
 
@@ -366,28 +364,26 @@
   ; <!DOCTYPE
   (read-string 9 in)
   (skip-space in)
-  (define doc-name (debug #:name 'doc-name (read-name in)))
+  (define doc-name (read-name in))
   (skip-space in)
   (define external-id
-    (debug #:name 'external-id
-           (cond
-             [(peek-string=? "SYSTEM" 0 in)
-              (read-string 6 in)
-              (skip-space in)
-              (list 'SYSTEM (read-system-literal in))]
-             [(peek-string=? "PUBLIC" 0 in)
-              (read-string 6 in)
-              (skip-space in)
-              (define pubid (read-pubid-literal in))
-              (skip-space in)
-              (list 'PUBLIC pubid (read-system-literal in))]
-             [else #f])))
+    (cond
+      [(peek-string=? "SYSTEM" 0 in)
+       (read-string 6 in)
+       (skip-space in)
+       (list 'SYSTEM (read-system-literal in))]
+      [(peek-string=? "PUBLIC" 0 in)
+       (read-string 6 in)
+       (skip-space in)
+       (define pubid (read-pubid-literal in))
+       (skip-space in)
+       (list 'PUBLIC pubid (read-system-literal in))]
+      [else #f]))
   (skip-space in)
   (define internal-subset
-    (debug #:name 'internal-subset
-           (if (scan v (peek-char in 0) (char=? #\[ v))
-               (read-internal-subset in)
-               #f)))
+    (if (scan v (peek-char in 0) (char=? #\[ v))
+        (read-internal-subset in)
+        #f))
   (skip-space in)
   (expect-char 'read-doctype #\> in)
   (doctype doc-name external-id internal-subset))
