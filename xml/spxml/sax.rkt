@@ -48,3 +48,22 @@
           [(? doctype?)    doctype-handler]))
       (handler doc tok))))
 
+(module+ test
+  (require xml/spxml/well-formed)
+
+  (define ((add-on x acc) doc tok)
+    (append doc (list (cons x (acc tok)))))
+
+  (call-with-input-file "../../smoke.xml"
+    (lambda (f)
+      (define wf-gen
+        (make-wf-generator f))
+
+      (define p
+        (make-sax-parser #:start-tag (add-on 'start start-tag-name)
+                         #:end-tag   (add-on 'end   end-tag-name)))
+
+      (p wf-gen null)))
+
+
+  )
