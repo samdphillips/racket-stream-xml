@@ -6,64 +6,66 @@
          (only-in racket/match
                   match)
          data/integer-set
-         racket/contract)
+         racket/contract
+         syntax/srcloc)
 
 (provide
- (contract-out [xml-token?   (-> any/c boolean?)]
-
-               [read-attrs   (-> input-port? (listof attr?))]
+ (contract-out [read-attrs   (-> input-port? (listof attr?))]
 
                [tokenize-xml (-> input-port? (or/c eof-object?
                                                    xml-token?))]
 
-               [struct char-data  ([text string?])]
-               [struct start-tag  ([closed? boolean?]
-                                   [name    string?]
-                                   [attrs   (listof attr?)])]
-               [struct end-tag    ([name string?])]               
-               [struct attr       ([name     string?]
+               [struct xml-token ([location source-location?])
+                       #:omit-constructor]
+
+               [struct char-data  ([location source-location?]
+                                   [text     string?])]
+               [struct start-tag  ([location source-location?]
+                                   [closed?  boolean?]
+                                   [name     string?]
+                                   [attrs    (listof attr?)])]
+               [struct end-tag    ([location source-location?]
+                                   [name     string?])]
+               [struct attr       ([location source-location?]
+                                   [name     string?]
                                    [value    (or/c string?
                                                    (listof
                                                      (or/c string?
                                                            entity-ref?)))])]
-               [struct comment    ([content string?])]
-               [struct cdata      ([content string?])]
-               [struct entity-ref ([name string?])]
-               [struct char-ref   ([value exact-nonnegative-integer?])]
-               [struct pi         ([target string?]
-                                   [data   string?])]
-               [struct doctype    ([name        string?]
-                                   [external-id (or/c #f)]
-                                   [internal-subset
-                                    (or/c #f string?)])]))
+               [struct comment    ([location source-location?]
+                                   [content  string?])]
+               [struct cdata      ([location source-location?]
+                                   [content  string?])]
+               [struct entity-ref ([location source-location?]
+                                   [name     string?])]
+               [struct char-ref   ([location source-location?]
+                                   [value    exact-nonnegative-integer?])]
+               [struct pi         ([location source-location?]
+                                   [target   string?]
+                                   [data     string?])]
+               [struct doctype    ([location        source-location?]
+                                   [name            string?]
+                                   [external-id     (or/c #f)]
+                                   [internal-subset (or/c #f string?)])]))
 
 (module+ test
   (require rackunit
            (only-in racket/port call-with-input-string)))
 
-(struct char-data  (text)               #:transparent)
-(struct start-tag  (closed? name attrs) #:transparent)
-(struct end-tag    (name)               #:transparent)
-(struct attr       (name value)         #:transparent)
-(struct comment    (content)            #:transparent)
-(struct cdata      (content)            #:transparent)
-(struct entity-ref (name)               #:transparent)
-(struct char-ref   (value)              #:transparent)
-(struct pi         (target data)        #:transparent)
-(struct doctype    (name
-                    external-id
-                    internal-subset)    #:transparent)
+(struct xml-token (location) #:transparent)
 
-(define (xml-token? x)
-  (or (char-data?  x)
-      (start-tag?  x)
-      (end-tag?    x)
-      (comment?    x)
-      (cdata?      x)
-      (entity-ref? x)
-      (char-ref?   x)
-      (pi?         x)
-      (doctype?    x)))
+(struct char-data  xml-token (text)               #:transparent)
+(struct start-tag  xml-token (closed? name attrs) #:transparent)
+(struct end-tag    xml-token (name)               #:transparent)
+(struct attr       xml-token (name value)         #:transparent)
+(struct comment    xml-token (content)            #:transparent)
+(struct cdata      xml-token (content)            #:transparent)
+(struct entity-ref xml-token (name)               #:transparent)
+(struct char-ref   xml-token (value)              #:transparent)
+(struct pi         xml-token (target data)        #:transparent)
+(struct doctype    xml-token (name
+                              external-id
+                              internal-subset)    #:transparent)
 
 (define (charset cx)
   (cond
@@ -183,13 +185,30 @@
           [(pred? i buf) (read-string i in)]
           [else (scan (add1 i))])))))
 
+(define (port-source-location port)
+  (and (port-count-lines-enabled)
+       (let-values ([(line col pos) (port-next-location port)])
+         (vector (object-name port) line col pos 0))))
+
+(define-syntax-rule (with-port-location (port srcloc) body ...)
+  (let ([srcloc
+         (let ([start-location (port-source-location port)])
+           (lambda ()
+             (and (port-count-lines-enabled)
+                  (build-source-location-vector
+                    start-location (port-source-location port)))))])
+    body ...))
+
 (define (read-content in)
-  (define buf (peek-string 1024 0 in))
-  (define i (string-index buf '(#\< #\&)))
-  (cond [(not i)   (char-data (read-string 1024 in))]
-        [(zero? i) (read-special in)]
-        [else
-         (char-data (read-string i in))]))
+  (with-port-location (in source-location)
+    (define buf (peek-string 1024 0 in))
+    (define i (string-index buf '(#\< #\&)))
+    (define (do-read-cdata size)
+      (let ([data (read-string size in)])
+        (char-data (source-location) data)))
+    (cond [(not i)   (do-read-cdata 1024)]
+          [(zero? i) (read-special in)]
+          [else      (do-read-cdata i)])))
 
 (define (read-special in)
   (define (ref?)
@@ -228,15 +247,16 @@
     (skip-space in)))
 
 (define (read-start-tag in)
-  (read-char in)
-  (define name  (read-name in))
-  (define attrs (read-attrs in))
-  (skip-space in)
-  (define closed?
-    (cond [(scan v (peek-char in) (char=? #\/ v)) (read-char in) #t]
-          [else #f]))
-  (expect-char 'read-start-tag #\> in)
-  (start-tag closed? name attrs))
+  (with-port-location (in source-location)
+    (read-char in)
+    (define name  (read-name in))
+    (define attrs (read-attrs in))
+    (skip-space in)
+    (define closed?
+      (cond [(scan v (peek-char in) (char=? #\/ v)) (read-char in) #t]
+            [else #f]))
+    (expect-char 'read-start-tag #\> in)
+    (start-tag (source-location) closed? name attrs)))
 
 (define (read-name in)
   (expect-next 'read-name in #:pred name-start-char?)
@@ -252,12 +272,13 @@
 (define (read-attr in)
   (skip-space in)
   (cond [(name-start-char? in)
-         (define name (read-name in))
-         (skip-space in)
-         (expect-char 'read-attr #\= in)
-         (skip-space in)
-         (define value (read-attr-value in))
-         (attr name value)]
+         (with-port-location (in source-location)
+           (define name (read-name in))
+           (skip-space in)
+           (expect-char 'read-attr #\= in)
+           (skip-space in)
+           (define value (read-attr-value in))
+           (attr (source-location) name value))]
         [else eof]))
 
 (define (read-attr-value in)
@@ -301,95 +322,102 @@
     (read-char in)))
 
 (define (read-reference in)
-  (define (read-char-ref i base)
-    (read-string i in)
-    (char-ref
-     (string->number (read-until-semi) base)))
+  (with-port-location (in source-location)
+    (define (read-char-ref i base)
+      (read-string i in)
+      (let ([s (read-until-semi)])
+        (char-ref (source-location) (string->number s base))))
 
-  (define (read-entity-ref)
-    (read-char in)
-    (entity-ref (read-until-semi)))
+    (define (read-entity-ref)
+      (read-char in)
+      (let ([s (read-until-semi)])
+        (entity-ref (source-location) s)))
 
-  (define (read-until-semi)
-    (begin0
-      (read-until (lambda (i buf) (char=? #\; (string-ref buf i))) in)
-      (read-char in)))
+    (define (read-until-semi)
+      (begin0
+        (read-until (lambda (i buf) (char=? #\; (string-ref buf i))) in)
+        (read-char in)))
 
-  (cond [(peek-string=? "&#x" 0 in) (read-char-ref 3 16)]
-        [(peek-string=? "&#"  0 in) (read-char-ref 2 10)]
-        [else (read-entity-ref)]))
+    (cond [(peek-string=? "&#x" 0 in) (read-char-ref 3 16)]
+          [(peek-string=? "&#"  0 in) (read-char-ref 2 10)]
+          [else (read-entity-ref)])))
 
 
 (define (read-end-tag in)
-  (read-string 2 in)
-  (define name (read-name in))
-  (skip-space in)
-  (expect-char 'read-end-tag #\> in)
-  (end-tag name))
+  (with-port-location (in source-location)
+    (read-string 2 in)
+    (define name (read-name in))
+    (skip-space in)
+    (expect-char 'read-end-tag #\> in)
+    (end-tag (source-location) name)))
 
 (define (read-comment in)
-  (define (end-comment? i in)
-    (peek-string=? "--" i in))
+  (with-port-location (in source-location)
+    (define (end-comment? i in)
+      (peek-string=? "--" i in))
 
-  (read-string 4 in)
-  (define content
-    (read-until end-comment? in))
+    (read-string 4 in)
+    (define content
+      (read-until end-comment? in))
 
-  (read-string 2 in)
-  (expect-char 'read-comment #\> in)
-  (comment content))
+    (read-string 2 in)
+    (expect-char 'read-comment #\> in)
+    (comment (source-location) content)))
 
 (define (read-cdata in)
-  (define (end-cdata? i in)
-    (peek-string=? "]]>" i in))
+  (with-port-location (in source-location)
+    (define (end-cdata? i in)
+      (peek-string=? "]]>" i in))
 
-  ; <!CDATA[[
-  (read-string 9 in)
-  (define content
-    (read-until end-cdata? in))
+    ; <!CDATA[[
+    (read-string 9 in)
+    (define content
+      (read-until end-cdata? in))
 
-  (read-string 3 in)
-  (cdata content))
+    (read-string 3 in)
+    (cdata (source-location) content)))
 
 (define (read-pi in)
-  (define (end-pi? i in)
-    (peek-string=? "?>" i in))
+  (with-port-location (in source-location)
+    (define (end-pi? i in)
+      (peek-string=? "?>" i in))
 
-  (read-string 2 in)
-  (define target (read-name in))
+    (read-string 2 in)
+    (define target (read-name in))
 
-  (skip-space in)
-  (define data (read-until end-pi? in))
-  (read-string 2 in)
-  (pi target data))
+    (skip-space in)
+    (define data (read-until end-pi? in))
+    (read-string 2 in)
+    (pi (source-location) target data)))
 
 (define (read-doctype in)
-  ; <!DOCTYPE
-  (read-string 9 in)
-  (skip-space in)
-  (define doc-name (read-name in))
-  (skip-space in)
-  (define external-id
-    (cond
-      [(peek-string=? "SYSTEM" 0 in)
-       (read-string 6 in)
-       (skip-space in)
-       (list 'SYSTEM (read-system-literal in))]
-      [(peek-string=? "PUBLIC" 0 in)
-       (read-string 6 in)
-       (skip-space in)
-       (define pubid (read-pubid-literal in))
-       (skip-space in)
-       (list 'PUBLIC pubid (read-system-literal in))]
-      [else #f]))
-  (skip-space in)
-  (define internal-subset
-    (if (scan v (peek-char in 0) (char=? #\[ v))
-        (read-internal-subset in)
-        #f))
-  (skip-space in)
-  (expect-char 'read-doctype #\> in)
-  (doctype doc-name external-id internal-subset))
+  (with-port-location (in source-location)
+    ; <!DOCTYPE
+    (read-string 9 in)
+    (skip-space in)
+    (define doc-name (read-name in))
+    (skip-space in)
+    (define external-id
+      (cond
+        [(peek-string=? "SYSTEM" 0 in)
+         (read-string 6 in)
+         (skip-space in)
+         (list 'SYSTEM (read-system-literal in))]
+        [(peek-string=? "PUBLIC" 0 in)
+         (read-string 6 in)
+         (skip-space in)
+         (define pubid (read-pubid-literal in))
+         (skip-space in)
+         (list 'PUBLIC pubid (read-system-literal in))]
+        [else #f]))
+    (skip-space in)
+    (define internal-subset
+      (if (scan v (peek-char in 0) (char=? #\[ v))
+          (read-internal-subset in)
+          #f))
+    (skip-space in)
+    (expect-char 'read-doctype #\> in)
+    (doctype (source-location) doc-name external-id internal-subset)))
 
 (define (read-system-literal in)
   (define q (read-char in))
@@ -421,55 +449,55 @@
                  (lambda (in)
                    (check-equal? (read-content in) expected) ...))))
 
-  (test-read "char data" "hello world!" (char-data "hello world!"))
-  (test-read "start tag" "<test>"       (start-tag #f "test" null))
+  (test-read "char data" "hello world!" (char-data #f "hello world!"))
+  (test-read "start tag" "<test>"       (start-tag #f #f "test" null))
   (test-read "start tag with attributes"
              "<test a='1' b=\"2\">"
-             (start-tag #f "test" (list (attr "a" "1")
-                                        (attr "b" "2"))))
+             (start-tag #f #f "test" (list (attr #f "a" "1")
+                                           (attr #f "b" "2"))))
   (test-read "start tag with empty attributes"
              "<test a='' b=\"\">"
-             (start-tag #f "test" (list (attr "a" "")
-                                        (attr "b" ""))))
+             (start-tag #f #f "test" (list (attr #f "a" "")
+                                           (attr #f "b" ""))))
 
   (test-read "start tag with reference attributes"
              "<test a='A &amp; B' b=\"&#34;\">"
-             (start-tag #f "test" (list (attr "a" (list "A "
-                                                        (entity-ref "amp")
+             (start-tag #f #f "test" (list (attr #f "a" (list "A "
+                                                        (entity-ref #f "amp")
                                                         " B"))
-                                        (attr "b" (char-ref 34)))))
+                                            (attr #f "b" (char-ref #f 34)))))
 
   (test-read "empty tag"
              "<test/>"
-             (start-tag #t "test" null))
+             (start-tag #f #t "test" null))
   (test-read "empty tag"
              "<test />"
-             (start-tag #t "test" null))
+             (start-tag #f #t "test" null))
 
   (test-read "end tag"
              "</test>"
-             (end-tag "test"))
+             (end-tag #f "test"))
   (test-read "end tag"
              "</test  >"
-             (end-tag "test"))
+             (end-tag #f "test"))
 
   (test-read "comment"
              "<!-- test -->"
-             (comment " test "))
+             (comment #f " test "))
 
   (test-read "cdata section"
              "<![CDATA[ <test> ]]>"
-             (cdata " <test> "))
+             (cdata #f " <test> "))
 
   (test-read "entity reference in content"
              "hello &amp; world"
-             (char-data "hello ")
-             (entity-ref "amp")
-             (char-data " world"))
+             (char-data #f "hello ")
+             (entity-ref #f "amp")
+             (char-data #f " world"))
 
   (test-read "PI"
              "<?xml version=\"1.0\"?>"
-             (pi "xml" "version=\"1.0\""))
+             (pi #f "xml" "version=\"1.0\""))
 
   (define doc #<<DOC
 <part number="1976">
@@ -493,24 +521,26 @@ DOC
              (check-equal?
               tokens
               (list
-               (start-tag #f "part" (list (attr "number" "1976")))
-               (char-data "\n    ")
-               (start-tag #f "name" '())
-               (char-data "Windscreen Wiper")
-               (end-tag "name")
-               (char-data "\n    ")
-               (start-tag #f "description" '())
+               (start-tag #f #f "part" (list (attr #f "number" "1976")))
+               (char-data #f "\n    ")
+               (start-tag #f #f "name" '())
+               (char-data #f "Windscreen Wiper")
+               (end-tag #f "name")
+               (char-data #f "\n    ")
+               (start-tag #f #f "description" '())
                (char-data
+                #f
                 (~a "\n      The Windscreen wiper automatically removes rain "
                     "from your\n      windscreen, if it should happen to "
                     "splash there.  It has a rubber\n      "))
-               (start-tag #f "ref" (list (attr "part" "1977")))
-               (char-data "blade")
-               (end-tag "ref")
+               (start-tag #f #f "ref" (list (attr #f "part" "1977")))
+               (char-data #f "blade")
+               (end-tag #f "ref")
                (char-data
+                #f
                 (~a " which can be ordered separately if\n      you need to "
                     "replace it.\n    "))
-               (end-tag "description")
-               (char-data "\n")
-               (end-tag "part"))))
+               (end-tag #f "description")
+               (char-data #f "\n")
+               (end-tag #f "part"))))
   )

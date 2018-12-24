@@ -32,9 +32,9 @@
     (call-with-input-string (pi-data tok) read-attrs))
   (define (check-attr a)
     (match a
-      [(or (attr "version" (pregexp "1.\\d+"))
-           (attr "standalone" (or "yes" "no"))
-           (attr "encoding" _)) #t]
+      [(or (attr _ "version" (pregexp "1.\\d+"))
+           (attr _ "standalone" (or "yes" "no"))
+           (attr _ "encoding" _)) #t]
       [_ #f]))
   (for/and ([a (in-list attrs)])
     (check-attr a)))
@@ -78,7 +78,7 @@
     (define (scan-prolog)
       ;; XMLDecl?
       (match (next-token)
-        [(and (pi "xml" _) token)
+        [(and (pi _ "xml" _) token)
          (unless (valid-xml-decl? token)
            (error 'wfc "invalid xml declaration: ~a~%" token))
          (yield token)]
@@ -102,7 +102,7 @@
       (match (next-token)
         [(and (or (? pi?) (? comment?)) token)
          (repeat token)]
-        [(and (char-data (? string-whitespace?)) token)
+        [(and (char-data _ (? string-whitespace?)) token)
          (repeat token)]
         [token
          (push-token! token)]))
@@ -128,20 +128,20 @@
     ;;       [WFC: No < in Attribute Values]
     (define (scan-body kont handle-eof handle-end-tag handle-other-token)
       (match (next-token)
-        [(start-tag _ _ attrs) (=> continue)
+        [(start-tag _ _ _ attrs) (=> continue)
          (unless (unique-attributes? attrs)
            (wfc-error "unique attributes specified" attrs))
          (continue)]
-        [(and (start-tag #f name attrs) token)
+        [(and (start-tag _ #f name attrs) token)
          (yield token)
          (scan-match name)
          (kont)]
-        [(and (start-tag #t _ attrs) token)
+        [(and (start-tag _ #t _ attrs) token)
          (yield token)
          (kont)]
         [(? eof-object?)
          (handle-eof)]
-        [(and (end-tag name) token) (=> continue)
+        [(and (end-tag _ name) token) (=> continue)
          (handle-end-tag name token continue)]
         [token
          (handle-other-token token)]))
@@ -183,24 +183,24 @@
 
   (check-process/exn "wfc: document production"
                      "<?xml version='1.0' encoding='utf-8'?>  a <test></test>"
-                     (pi "xml" "version='1.0' encoding='utf-8'"))
+                     (pi _ "xml" "version='1.0' encoding='utf-8'"))
   (check-process/exn "wfc: document production"
                      "<test>"
-                     (start-tag #f "test" _))
+                     (start-tag _ #f "test" _))
   (check-process/exn "wfc: document production"
                      "<test><test>"
-                     (start-tag #f "test" _)
-                     (start-tag #f "test" _))
+                     (start-tag _ #f "test" _)
+                     (start-tag _ #f "test" _))
 
   (check-process/exn "wfc: unique attributes"
                      "<test a=\"1\" b=\"2\" a=\"3\">")
   (check-process/exn "wfc: unique attributes"
                      "<test><test a=\"1\" b=\"2\" a=\"3\">"
-                     (start-tag _ "test" _))
+                     (start-tag _ _ "test" _))
 
   (check-process "doc1"
                  "<test><a/></test>"
-                 (start-tag #f "test" null)
-                 (start-tag #t "a" null)
-                 (end-tag "test"))
+                 (start-tag _ #f "test" null)
+                 (start-tag _ #t "a" null)
+                 (end-tag _ "test"))
 )
