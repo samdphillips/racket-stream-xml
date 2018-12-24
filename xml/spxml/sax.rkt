@@ -1,8 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/match
-                  match)
-
+(require (only-in racket/match match)
          xml/spxml/tokenize)
 
 (provide make-sax-parser)
@@ -49,12 +47,26 @@
       (handler doc tok))))
 
 (module+ test
-  (require xml/spxml/well-formed)
+  (require xml/spxml/well-formed
+           (only-in racket/port call-with-input-string))
 
   (define ((add-on x acc) doc tok)
     (append doc (list (cons x (acc tok)))))
 
-  (call-with-input-file "../../smoke.xml"
+  (define smoke-doc #<<DOC
+<part number="1976">
+    <name>Windscreen Wiper</name>
+    <description>
+      The Windscreen wiper automatically removes rain from your
+      windscreen, if it should happen to splash there.  It has a rubber
+      <ref part="1977">blade</ref> which can be ordered separately if
+      you need to replace it.
+    </description>
+</part>
+DOC
+  )
+
+  (call-with-input-string smoke-doc
     (lambda (f)
       (define wf-gen
         (make-wf-generator f))
