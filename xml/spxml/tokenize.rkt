@@ -227,7 +227,7 @@
 (define (read-start-tag in)
   (read-char in)
   (define name  (read-name in))
-  (define attrs (read-attrs in))  
+  (define attrs (read-attrs in))
   (skip-space in)
   (define closed?
     (cond [(scan v (peek-char in) (char=? #\/ v)) (read-char in) #t]
@@ -420,19 +420,19 @@
 
   (test-read "char data" "hello world!" (char-data "hello world!"))
   (test-read "start tag" "<test>"       (start-tag #f "test" null))
-  (test-read "start tag with attributes" 
+  (test-read "start tag with attributes"
              "<test a='1' b=\"2\">"
              (start-tag #f "test" (list (attr "a" "1")
                                         (attr "b" "2"))))
-  (test-read "start tag with empty attributes" 
+  (test-read "start tag with empty attributes"
              "<test a='' b=\"\">"
              (start-tag #f "test" (list (attr "a" "")
                                         (attr "b" ""))))
 
-  (test-read "start tag with reference attributes" 
+  (test-read "start tag with reference attributes"
              "<test a='A &amp; B' b=\"&#34;\">"
              (start-tag #f "test" (list (attr "a" (list "A "
-                                                        (entity-ref "amp") 
+                                                        (entity-ref "amp")
                                                         " B"))
                                         (attr "b" (char-ref 34)))))
 
@@ -449,7 +449,7 @@
   (test-read "end tag"
              "</test  >"
              (end-tag "test"))
-  
+
   (test-read "comment"
              "<!-- test -->"
              (comment " test "))
