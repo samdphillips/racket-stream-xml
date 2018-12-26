@@ -186,7 +186,7 @@
           [else (scan (add1 i))])))))
 
 (define (port-source-location port)
-  (and (port-count-lines-enabled)
+  (and (port-counts-lines? port)
        (let-values ([(line col pos) (port-next-location port)])
          (vector (object-name port) line col pos 0))))
 
@@ -194,7 +194,7 @@
   (let ([srcloc
          (let ([start-location (port-source-location port)])
            (lambda ()
-             (and (port-count-lines-enabled)
+             (and (port-counts-lines? port)
                   (build-source-location-vector
                     start-location (port-source-location port)))))])
     body ...))
