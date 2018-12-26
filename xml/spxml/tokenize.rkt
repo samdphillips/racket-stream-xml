@@ -20,9 +20,12 @@
                [struct start-tag  ([closed? boolean?]
                                    [name    string?]
                                    [attrs   (listof attr?)])]
-               [struct end-tag    ([name string?])]
-               [struct attr       ([name  string?]
-                                   [value string?])]
+               [struct end-tag    ([name string?])]               
+               [struct attr       ([name     string?]
+                                   [value    (or/c string?
+                                                   (listof
+                                                     (or/c string?
+                                                           entity-ref?)))])]
                [struct comment    ([content string?])]
                [struct cdata      ([content string?])]
                [struct entity-ref ([name string?])]
