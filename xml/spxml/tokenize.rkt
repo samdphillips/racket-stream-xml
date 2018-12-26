@@ -50,7 +50,10 @@
 
 (module+ test
   (require rackunit
-           (only-in racket/port call-with-input-string)))
+           (only-in racket/match ==)
+           (only-in racket/port
+                    call-with-input-string
+                    with-output-to-string)))
 
 (struct xml-token (location) #:transparent)
 
@@ -148,10 +151,19 @@
   (define peek
     (cond [(and (input-port? in) (zero? i)) peek-string]
           [(string? in) (lambda (amount start s)
-                          (substring s start (+ start amount)))]
+                          (let* ([end (+ start amount)]
+                                 [end
+                                   (let ([len (string-length s)])
+                                     (if (< end len) end len))])
+                            (substring s start end)))]
           [else
            (error 'peek-string=? "expected string or input-port got: ~a" in)]))
   (scan v (peek (string-length s) i in) (string=? s v)))
+
+(module+ test
+  (check-not-exn
+    (lambda ()
+      (peek-string=? "abc" 0 "a"))))
 
 (define (string-index s p*)
   (for/or ([c (in-string s)]
@@ -376,6 +388,15 @@
 
     (read-string 3 in)
     (cdata (source-location) content)))
+
+(module+ test
+  (test-case "long cdata"
+    (let ([s (with-output-to-string
+               (lambda ()
+                 (for ([n 512]) (display "AbCd"))))])
+      (check-match
+        (call-with-input-string (~a "<!CDATA[[" s "]]>") read-cdata)
+        (cdata _ (== s))))))
 
 (define (read-pi in)
   (with-port-location (in source-location)
