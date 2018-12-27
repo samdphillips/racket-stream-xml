@@ -69,7 +69,8 @@ DOC
   (call-with-input-string smoke-doc
     (lambda (f)
       (define wf-gen
-        (make-wf-generator f))
+        (make-wf-generator
+          (lambda () (tokenize-xml f))))
 
       (define p
         (make-sax-parser #:start-tag (add-on 'start start-tag-name)

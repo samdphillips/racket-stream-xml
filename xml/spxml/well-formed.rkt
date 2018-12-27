@@ -14,7 +14,8 @@
 
 (provide
  (contract-out [make-wf-generator
-                (-> input-port? (-> (or/c eof-object? xml-token?)))]))
+                (-> (-> (or/c eof-object? xml-token?))
+                    (-> (or/c eof-object? xml-token?)))]))
 
 (define wfc-error
   (case-lambda
@@ -62,11 +63,8 @@
 ;;   [WFC: No Recursion]
 ;;   [WFC: In DTD]
 
-;; make-wf-generator : Input-Port -> (-> Xml-Token)
-(define (make-wf-generator in)
-  (define (next-token)
-    (tokenize-xml in))
-
+;; make-wf-generator : (-> Xml-Token) -> (-> Xml-Token)
+(define (make-wf-generator next-token)
   (define (push-token! token)
     (define orig next-token)
     (set! next-token
@@ -168,7 +166,7 @@
     (test-case name
       (call-with-input-string s
         (lambda (in)
-          (define next (make-wf-generator in))
+          (define next (make-wf-generator (lambda () (tokenize-xml in))))
           (check-match (next) pats) ...
           (check-exn exn:fail?
                      (lambda () (next)))))))
@@ -177,7 +175,7 @@
     (test-case name
       (call-with-input-string s
         (lambda (in)
-          (define next (make-wf-generator in))
+          (define next (make-wf-generator (lambda () (tokenize-xml in))))
           (check-match (next) pats) ...
           (check-match (next) (? eof-object?))))))
 
