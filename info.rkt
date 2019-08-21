@@ -1,5 +1,5 @@
 #lang info
 
 (define collection 'multi)
-(define name "spxml")
+(define name "stream-xml")
 

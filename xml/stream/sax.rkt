@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/match match)
-         xml/spxml/tokenize)
+         xml/stream/tokenize)
 
 (provide make-sax-parser)
 
@@ -47,7 +47,7 @@
       (handler doc tok))))
 
 (module+ test
-  (require xml/spxml/well-formed
+  (require xml/stream/well-formed
            (only-in racket/port call-with-input-string))
 
   (define ((add-on x acc) doc tok)

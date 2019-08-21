@@ -10,7 +10,7 @@
          racket/generator
          racket/match
 
-         xml/spxml/tokenize)
+         xml/stream/tokenize)
 
 (provide
  (contract-out [make-wf-generator
