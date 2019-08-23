@@ -45,38 +45,3 @@
           [(? pi?)         pi-handler]
           [(? doctype?)    doctype-handler]))
       (handler doc tok))))
-
-(module+ test
-  (require xml/stream/well-formed
-           (only-in racket/port call-with-input-string))
-
-  (define ((add-on x acc) doc tok)
-    (append doc (list (cons x (acc tok)))))
-
-  (define smoke-doc #<<DOC
-<part number="1976">
-    <name>Windscreen Wiper</name>
-    <description>
-      The Windscreen wiper automatically removes rain from your
-      windscreen, if it should happen to splash there.  It has a rubber
-      <ref part="1977">blade</ref> which can be ordered separately if
-      you need to replace it.
-    </description>
-</part>
-DOC
-  )
-
-  (call-with-input-string smoke-doc
-    (lambda (f)
-      (define wf-gen
-        (make-wf-generator
-          (lambda () (tokenize-xml f))))
-
-      (define p
-        (make-sax-parser #:start-tag (add-on 'start start-tag-name)
-                         #:end-tag   (add-on 'end   end-tag-name)))
-
-      (p wf-gen null)))
-
-
-  )

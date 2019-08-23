@@ -5,9 +5,12 @@
                   ~s)
          (only-in racket/match
                   match)
-         data/integer-set
          racket/contract
-         syntax/srcloc)
+         syntax/srcloc
+
+         "private/tokenize/readers.rkt"
+         "private/tokenize/srcloc.rkt"
+         "private/tokenize/tokens.rkt")
 
 (provide
  (contract-out [read-attrs   (-> input-port? (listof attr?))]
@@ -54,162 +57,6 @@
            (only-in racket/port
                     call-with-input-string
                     with-output-to-string)))
-
-(struct xml-token (location) #:transparent)
-
-(struct char-data  xml-token (text)               #:transparent)
-(struct start-tag  xml-token (closed? name attrs) #:transparent)
-(struct end-tag    xml-token (name)               #:transparent)
-(struct attr       xml-token (name value)         #:transparent)
-(struct comment    xml-token (content)            #:transparent)
-(struct cdata      xml-token (content)            #:transparent)
-(struct entity-ref xml-token (name)               #:transparent)
-(struct char-ref   xml-token (value)              #:transparent)
-(struct pi         xml-token (target data)        #:transparent)
-(struct doctype    xml-token (name
-                              external-id
-                              internal-subset)    #:transparent)
-
-(define (charset cx)
-  (cond
-    [(list? cx) (make-range (char->integer (car cx))
-                            (char->integer (cadr cx)))]
-    [(char? cx) (make-range (char->integer cx))]))
-
-(define (%charset* xs)
-  (for/fold ([cs (make-range)]) ([r (in-list xs)])
-    (union cs (charset r))))
-
-(define-syntax-rule (charset* x ...)
-  (%charset* '(x ...)))
-
-(define name-start-char
-  (charset* #\:
-            (#\A #\Z)
-            #\_
-            (#\a #\z)
-            (#\uC0 #\uD6)
-            (#\uD8 #\uF6)
-            (#\uF8 #\u2FF)
-            (#\u370 #\u37D)
-            (#\u37F #\u1FFF)
-            (#\u200C #\u200D)
-            (#\u2070 #\u218F)
-            (#\u2C00 #\u2FEF)
-            (#\u3001 #\uD7FF)
-            (#\uF900 #\uFDCF)
-            (#\uFDF0 #\uFFFD)
-            (#\U10000 #\UEFFFF)))
-
-(define name-char
-  (union
-   name-start-char
-   (charset* #\.
-             #\-
-             (#\0 #\9)
-             #\uB7
-             (#\u0300 #\u036F)
-             (#\u203F #\u2040))))
-
-(define space-char
-  (charset* #\u20
-            #\u09
-            #\u0d
-            #\u0a))
-
-(define pubid-char
-  (charset* #\u20
-            #\uD
-            #\uA
-            (#\a #\z)
-            (#\A #\Z)
-            (#\0 #\9)
-            #\- #\( #\) #\+ #\, #\.
-            #\/ #\: #\= #\? #\; #\!
-            #\* #\# #\@ #\$ #\_ #\%))
-
-(define ((peek-for-charset cs) in [skip 0])
-  (define c
-    (cond [(string? in) (string-ref in skip)]
-          [(and (input-port? in) (zero? skip)) (peek-char in)]
-          [else (error 'peek-for-charset "can't read from: ~a" in)]))
-  (cond [(eof-object? c) #f]
-        [else (member?  (char->integer c) cs)]))
-
-(define-syntax-rule (define-peeker name char-set)
-  (define name (procedure-rename (peek-for-charset char-set) 'name)))
-
-(define-peeker name-start-char? name-start-char)
-(define-peeker name-char?       name-char)
-(define-peeker space-char?      space-char)
-
-(define-syntax-rule (scan v e c ...)
-  (let ([v e])
-    (and (not (eof-object? v)) c ...)))
-
-(define (peek-string=? s i in)
-  (define peek
-    (cond [(and (input-port? in) (zero? i)) peek-string]
-          [(string? in) (lambda (amount start s)
-                          (let* ([end (+ start amount)]
-                                 [end
-                                   (let ([len (string-length s)])
-                                     (if (< end len) end len))])
-                            (substring s start end)))]
-          [else
-           (error 'peek-string=? "expected string or input-port got: ~a" in)]))
-  (scan v (peek (string-length s) i in) (string=? s v)))
-
-(module+ test
-  (check-not-exn
-    (lambda ()
-      (peek-string=? "abc" 0 "a"))))
-
-(define (string-index s p*)
-  (for/or ([c (in-string s)]
-           [i (in-naturals)])
-    (for/or ([p (in-list p*)])
-      (and (char=? p c) i))))
-
-(define (expect-next name
-                     in
-                     #:chars [expected-ch* null]
-                     #:pred [expected-pred? #f])
-  (define pred?
-    (or expected-pred?
-        (peek-for-charset (%charset* expected-ch*))))
-  (unless (pred? in)
-    (define expected-name
-      (or (and expected-pred? (object-name expected-pred?))
-          (~s expected-ch*)))
-    (error name "expected one of ~a, got: ~s" expected-name (peek-char in))))
-
-(define (expect-char name expected in)
-  (expect-next name in #:chars (list expected))
-  (void (read-char in)))
-
-(define (read-until pred? in [start 0])
-  (let scan-out ([amount 1024])
-    (let ([buf (peek-string amount 0 in)])
-      (let scan ([i start])
-        (cond
-          [(> i amount)  (scan-out (+ amount 1024))]
-          [(pred? i buf) (read-string i in)]
-          [else (scan (add1 i))])))))
-
-(define (port-source-location port)
-  (and (port-counts-lines? port)
-       (let-values ([(line col pos) (port-next-location port)])
-         (vector (object-name port) line col pos 0))))
-
-(define-syntax-rule (with-port-location (port srcloc) body ...)
-  (let ([srcloc
-         (let ([start-location (port-source-location port)])
-           (lambda ()
-             (and (port-counts-lines? port)
-                  (build-source-location-vector
-                    start-location (port-source-location port)))))])
-    body ...))
 
 (define (read-content in)
   (with-port-location (in source-location)
