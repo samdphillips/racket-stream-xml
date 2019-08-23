@@ -18,6 +18,8 @@
                [tokenize-xml (-> input-port? (or/c eof-object?
                                                    xml-token?))]
 
+               [use-case-sensitive-doctype? (parameter/c boolean?)]
+
                [struct xml-token ([location source-location?])
                        #:omit-constructor]
 
@@ -58,6 +60,8 @@
                     call-with-input-string
                     with-output-to-string)))
 
+(define use-case-sensitive-doctype? (make-parameter #t))
+
 (define (read-content in)
   (with-port-location (in source-location)
     (define buf (peek-string 1024 0 in))
@@ -79,7 +83,8 @@
   (define (pi?)
     (peek-string=? "<?" 0 in))
   (define (doctype?)
-    (peek-string=? "<!DOCTYPE" 0 in))
+    (peek-string=? #:case-sensitive (use-case-sensitive-doctype?)
+                   "<!DOCTYPE" 0 in))
   (define (end-tag?)
     (peek-string=? "</" 0 in))
   (define (start-tag?)

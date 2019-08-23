@@ -92,7 +92,7 @@
   (let ([v e])
     (and (not (eof-object? v)) c ...)))
 
-(define (peek-string=? s i in)
+(define (peek-string=? s i in #:case-sensitive [case-sensitive? #t])
   (define peek
     (cond [(and (input-port? in) (zero? i)) peek-string]
           [(string? in) (lambda (amount start s)
@@ -103,7 +103,8 @@
                             (substring s start end)))]
           [else
            (error 'peek-string=? "expected string or input-port got: ~a" in)]))
-  (scan v (peek (string-length s) i in) (string=? s v)))
+  (define =? (if case-sensitive? string=? string-ci=?))
+  (scan v (peek (string-length s) i in) (=? s v)))
 
 (module+ test
   (check-not-exn
