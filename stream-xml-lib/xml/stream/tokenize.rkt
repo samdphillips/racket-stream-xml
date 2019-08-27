@@ -8,6 +8,8 @@
          racket/contract
          syntax/srcloc
 
+         syntax/parse/define
+
          "private/tokenize/readers.rkt"
          "private/tokenize/srcloc.rkt"
          "private/tokenize/tokens.rkt")
@@ -17,8 +19,11 @@
 
                [tokenize-xml (-> input-port? (or/c eof-object?
                                                    xml-token?))]
+               [rename tokenize-xml read-xml
+                       (-> input-port? (or/c eof-object? xml-token?))]
 
                [use-case-sensitive-doctype? (parameter/c boolean?)]
+               [current-xml-special-readers (parameter/c list?)]
 
                [struct xml-token ([location source-location?])
                        #:omit-constructor]
@@ -73,44 +78,22 @@
           [(zero? i) (read-special in)]
           [else      (do-read-cdata i)])))
 
-(define (read-special in)
-  (define (ref?)
-    (scan v (peek-char in) (char=? #\& v)))
-  (define (comment?)
-    (peek-string=? "<!--" 0 in))
-  (define (cdata?)
-    (peek-string=? "<![CDATA[" 0 in))
-  (define (pi?)
-    (peek-string=? "<?" 0 in))
-  (define (doctype?)
-    (peek-string=? #:case-sensitive (use-case-sensitive-doctype?)
-                   "<!DOCTYPE" 0 in))
-  (define (end-tag?)
-    (peek-string=? "</" 0 in))
-  (define (start-tag?)
-    (define s (peek-string 2 0 in))
-    (and (char=? #\< (string-ref s 0))
-         (name-start-char? s 1)))
-
-  (cond [(start-tag?) (read-start-tag in)]
-        [(end-tag?)   (read-end-tag   in)]
-        [(comment?)   (read-comment   in)]
-        [(ref?)       (read-reference in)]
-        [(cdata?)     (read-cdata     in)]
-        [(pi?)        (read-pi        in)]
-        [(doctype?)   (read-doctype   in)]
-        [else
-         (error 'read-special
-                (~a "expected processing instruction, reference, "
-                    "comment, cdata, end tag, or start tag.  got: ~a")
-                (peek-string 5 0 in))]))
+(define-simple-macro
+  (define/read-special (name:id in:id args:id ...) test:id body ...)
+  (define (name in args ...) (and (test in) (let () body ...))))
 
 (define (skip-space in)
   (when (space-char? in)
     (read-char in)
     (skip-space in)))
 
-(define (read-start-tag in)
+(define (peek-start-tag? in)
+  (define s (peek-string 2 0 in))
+  (and (char=? #\< (string-ref s 0))
+       (name-start-char? s 1)))
+
+(define/read-special (read-start-tag in)
+  peek-start-tag?
   (with-port-location (in source-location)
     (read-char in)
     (define name  (read-name in))
@@ -185,7 +168,11 @@
     (read-value null 0)
     (read-char in)))
 
-(define (read-reference in)
+(define (peek-reference? in)
+  (scan v (peek-char in) (char=? #\& v)))
+
+(define/read-special (read-reference in)
+  peek-reference?
   (with-port-location (in source-location)
     (define (read-char-ref i base)
       (read-string i in)
@@ -206,8 +193,11 @@
           [(peek-string=? "&#"  0 in) (read-char-ref 2 10)]
           [else (read-entity-ref)])))
 
+(define (peek-end-tag? in)
+  (peek-string=? "</" 0 in))
 
-(define (read-end-tag in)
+(define/read-special (read-end-tag in)
+  peek-end-tag?
   (with-port-location (in source-location)
     (read-string 2 in)
     (define name (read-name in))
@@ -215,7 +205,11 @@
     (expect-char 'read-end-tag #\> in)
     (end-tag (source-location) name)))
 
-(define (read-comment in)
+(define (peek-comment? in)
+  (peek-string=? "<!--" 0 in))
+
+(define/read-special (read-comment in)
+  peek-comment?
   (with-port-location (in source-location)
     (define (end-comment? i in)
       (peek-string=? "--" i in))
@@ -228,7 +222,11 @@
     (expect-char 'read-comment #\> in)
     (comment (source-location) content)))
 
-(define (read-cdata in)
+(define (peek-cdata? in)
+  (peek-string=? "<![CDATA[" 0 in))
+
+(define/read-special (read-cdata in)
+  peek-cdata?
   (with-port-location (in source-location)
     (define (end-cdata? i in)
       (peek-string=? "]]>" i in))
@@ -247,10 +245,14 @@
                (lambda ()
                  (for ([n 512]) (display "AbCd"))))])
       (check-match
-        (call-with-input-string (~a "<!CDATA[[" s "]]>") read-cdata)
+        (call-with-input-string (~a "<![CDATA[" s "]]>") read-cdata)
         (cdata _ (== s))))))
 
-(define (read-pi in)
+(define (peek-pi? in)
+  (peek-string=? "<?" 0 in))
+
+(define/read-special (read-pi in)
+  peek-pi?
   (with-port-location (in source-location)
     (define (end-pi? i in)
       (peek-string=? "?>" i in))
@@ -263,7 +265,12 @@
     (read-string 2 in)
     (pi (source-location) target data)))
 
-(define (read-doctype in)
+(define (peek-doctype? in)
+  (peek-string=? #:case-sensitive (use-case-sensitive-doctype?)
+                  "<!DOCTYPE" 0 in))
+
+(define/read-special (read-doctype in)
+  peek-doctype?
   (with-port-location (in source-location)
     ; <!DOCTYPE
     (read-string 9 in)
@@ -309,6 +316,23 @@
   (begin0
     (read-until (lambda (i buf) (scan v (string-ref buf i) (char=? #\] v))) in)
     (expect-char 'read-internal-subset #\] in)))
+
+(define current-xml-special-readers
+  (make-parameter
+    (list read-start-tag
+          read-end-tag
+          read-comment
+          read-reference
+          read-cdata
+          read-pi
+          read-doctype)))
+
+(define (read-special in)
+  (or (for/or ([read (in-list (current-xml-special-readers))]) (read in))
+      (error 'read-special
+             (~a "expected processing instruction, reference, "
+                 "comment, cdata, end tag, or start tag.  got: ~a")
+             (peek-string 5 0 in))))
 
 (define (tokenize-xml in)
   (define c (peek-char in))
@@ -416,4 +440,4 @@ DOC
                (end-tag #f "description")
                (char-data #f "\n")
                (end-tag #f "part"))))
-  )
+)
