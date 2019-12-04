@@ -14,12 +14,18 @@
          "private/tokenize/srcloc.rkt"
          "private/tokenize/tokens.rkt")
 
+(define attr-value/c
+  (or/c string?
+        (listof (or/c string?
+                      entity-ref?
+                      char-ref?))))
+
 (provide
  (contract-out [read-attrs   (-> input-port? (listof attr?))]
 
                [tokenize-xml (-> input-port? (or/c eof-object?
                                                    xml-token?))]
-               [rename tokenize-xml read-xml
+               [rename tokenize-xml read-xml-token
                        (-> input-port? (or/c eof-object? xml-token?))]
 
                [use-case-sensitive-doctype? (parameter/c boolean?)]
@@ -38,10 +44,7 @@
                                    [name     string?])]
                [struct attr       ([location source-location?]
                                    [name     string?]
-                                   [value    (or/c string?
-                                                   (listof
-                                                     (or/c string?
-                                                           entity-ref?)))])]
+                                   [value    attr-value/c])]
                [struct comment    ([location source-location?]
                                    [content  string?])]
                [struct cdata      ([location source-location?]
@@ -113,6 +116,7 @@
   (check-equal?
    (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส์"))
 
+;; XXX: read-xml-attrs
 (define (read-attrs in)
   (for/list ([a (in-port read-attr in)]) a))
 
@@ -157,6 +161,9 @@
               (error 'read-attr-value
                      "eof while reading attrvalue")
               (read-value s (add1 i)))]))
+
+  ;; XXX: if the attribute value was a single entity would that violate the
+  ;; contract attr-value/c
 
   (define (normalize v)
     (match v
@@ -240,6 +247,7 @@
     (cdata (source-location) content)))
 
 (module+ test
+  ;; FIXME: use test-read
   (test-case "long cdata"
     (let ([s (with-output-to-string
                (lambda ()
@@ -309,8 +317,10 @@
     (read-until (lambda (i buf) (scan v (string-ref buf i) (char=? q v))) in)
     (read-char in)))
 
+; FIXME:
 (define (read-pubid-literal in) #f)
 
+; FIXME: parse parts of internal subset
 (define (read-internal-subset in)
   (read-char in)
   (begin0
@@ -329,6 +339,7 @@
 
 (define (read-special in)
   (or (for/or ([read (in-list (current-xml-special-readers))]) (read in))
+      ;; FIXME: specialize error
       (error 'read-special
              (~a "expected processing instruction, reference, "
                  "comment, cdata, end tag, or start tag.  got: ~a")
@@ -340,6 +351,7 @@
       (read-content in)))
 
 (module+ test
+  ;; FIXME: abstract reader, use check-match
   (define-syntax-rule (test-read description input-string expected ...)
     (test-case description
                (call-with-input-string input-string

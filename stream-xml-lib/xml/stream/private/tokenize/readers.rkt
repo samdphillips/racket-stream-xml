@@ -94,6 +94,7 @@
 
 (define (peek-string=? s i in #:case-sensitive [case-sensitive? #t])
   (define peek
+    ;; XXX: input-ports can only use offset zero ?!?
     (cond [(and (input-port? in) (zero? i)) peek-string]
           [(string? in) (lambda (amount start s)
                           (let* ([end (+ start amount)]
