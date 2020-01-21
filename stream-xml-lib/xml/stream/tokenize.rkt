@@ -21,7 +21,7 @@
                       char-ref?))))
 
 (provide
- (contract-out [read-attrs   (-> input-port? (listof attr?))]
+ (contract-out [read-xml-attrs   (-> input-port? (listof attr?))]
 
                [tokenize-xml (-> input-port? (or/c eof-object?
                                                    xml-token?))]
@@ -100,7 +100,7 @@
   (with-port-location (in source-location)
     (read-char in)
     (define name  (read-name in))
-    (define attrs (read-attrs in))
+    (define attrs (read-xml-attrs in))
     (skip-space in)
     (define closed?
       (cond [(scan v (peek-char in) (char=? #\/ v)) (read-char in) #t]
@@ -116,8 +116,7 @@
   (check-equal?
    (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส์"))
 
-;; XXX: read-xml-attrs
-(define (read-attrs in)
+(define (read-xml-attrs in)
   (for/list ([a (in-port read-attr in)]) a))
 
 (define (read-attr in)

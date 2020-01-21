@@ -30,7 +30,7 @@
 
 (define (valid-xml-decl? tok)
   (define attrs
-    (call-with-input-string (pi-data tok) read-attrs))
+    (call-with-input-string (pi-data tok) read-xml-attrs))
   (define (check-attr a)
     (match a
       [(or (attr _ "version" (pregexp "1.\\d+"))
