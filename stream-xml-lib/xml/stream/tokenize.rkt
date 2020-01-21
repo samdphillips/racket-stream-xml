@@ -16,6 +16,8 @@
 
 (define attr-value/c
   (or/c string?
+        entity-ref?
+        char-ref?
         (listof (or/c string?
                       entity-ref?
                       char-ref?))))
@@ -161,9 +163,6 @@
                      "eof while reading attrvalue")
               (read-value s (add1 i)))]))
 
-  ;; XXX: if the attribute value was a single entity would that violate the
-  ;; contract attr-value/c
-
   (define (normalize v)
     (match v
       [(list a)              a]
@@ -173,6 +172,17 @@
   (begin0
     (read-value null 0)
     (read-char in)))
+
+(module+ test
+  (test-case "check single entities are attr-values"
+    (define ent (call-with-input-string "'&gt;'" read-attr-value))
+    (check-equal? ent (entity-ref #f "gt"))
+    (check-true (attr-value/c ent)))
+
+  (test-case "check single characters are attr-values"
+    (define ent (call-with-input-string "'&#10;'" read-attr-value))
+    (check-equal? ent (char-ref #f 10))
+    (check-true (attr-value/c ent))))
 
 (define (peek-reference? in)
   (scan v (peek-char in) (char=? #\& v)))
