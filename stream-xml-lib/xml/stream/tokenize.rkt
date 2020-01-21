@@ -64,11 +64,24 @@
                                    [internal-subset (or/c #f string?)])]))
 
 (module+ test
-  (require rackunit
+  (require (for-syntax racket/base)
+           rackunit
            (only-in racket/match ==)
            (only-in racket/port
                     call-with-input-string
-                    with-output-to-string)))
+                    with-output-to-string))
+
+  (define-simple-macro (test-read description:string
+                                  {~or input-string:string
+                                       input-string:expr}
+                                  {~optional {~seq #:reader reader}
+                                             #:defaults
+                                             [(reader #'read-content)]}
+                                  expected ...)
+    (test-case description
+      (call-with-input-string input-string
+        (lambda (in)
+          (check-match (reader in) expected) ...)))))
 
 (define use-case-sensitive-doctype? (make-parameter #t))
 
@@ -115,8 +128,10 @@
   (read-until (lambda (i buf) (not (name-char? buf i))) in 1))
 
 (module+ test
-  (check-equal?
-   (call-with-input-string "เจมส์ [\r\n<!ELEM" read-name) "เจมส์"))
+  (test-read "read-name special chars"
+             "เจมส์ [\r\n<!ELEM"
+             #:reader read-name
+             "เจมส์"))
 
 (define (read-xml-attrs in)
   (for/list ([a (in-port read-attr in)]) a))
@@ -174,15 +189,17 @@
     (read-char in)))
 
 (module+ test
-  (test-case "check single entities are attr-values"
-    (define ent (call-with-input-string "'&gt;'" read-attr-value))
-    (check-equal? ent (entity-ref #f "gt"))
-    (check-true (attr-value/c ent)))
+  (test-read "check single entity references are attr-values"
+    "'&gt;'"
+    #:reader read-attr-value
+    (and (entity-ref _ "gt")
+         (? attr-value/c)))
 
-  (test-case "check single characters are attr-values"
-    (define ent (call-with-input-string "'&#10;'" read-attr-value))
-    (check-equal? ent (char-ref #f 10))
-    (check-true (attr-value/c ent))))
+  (test-read "check single character references are attr-values"
+    "'&#10;'"
+    #:reader read-attr-value
+    (and (char-ref _ 10)
+         (? attr-value/c))))
 
 (define (peek-reference? in)
   (scan v (peek-char in) (char=? #\& v)))
@@ -256,14 +273,13 @@
     (cdata (source-location) content)))
 
 (module+ test
-  ;; FIXME: use test-read
-  (test-case "long cdata"
-    (let ([s (with-output-to-string
-               (lambda ()
-                 (for ([n 512]) (display "AbCd"))))])
-      (check-match
-        (call-with-input-string (~a "<![CDATA[" s "]]>") read-cdata)
-        (cdata _ (== s))))))
+  (let ([s (with-output-to-string
+             (lambda ()
+               (for ([n 512]) (display "AbCd"))))])
+    (test-read "long cdata"
+      (string-append "<![CDATA[" s "]]>")
+      #:reader read-cdata
+      (cdata _ (== s)))))
 
 (define (peek-pi? in)
   (peek-string=? "<?" 0 in))
@@ -360,13 +376,6 @@
       (read-content in)))
 
 (module+ test
-  ;; FIXME: abstract reader, use check-match
-  (define-syntax-rule (test-read description input-string expected ...)
-    (test-case description
-               (call-with-input-string input-string
-                 (lambda (in)
-                   (check-equal? (read-content in) expected) ...))))
-
   (test-read "char data" "hello world!" (char-data #f "hello world!"))
   (test-read "start tag" "<test>"       (start-tag #f #f "test" null))
   (test-read "start tag with attributes"
@@ -383,7 +392,7 @@
              (start-tag #f #f "test" (list (attr #f "a" (list "A "
                                                         (entity-ref #f "amp")
                                                         " B"))
-                                            (attr #f "b" (char-ref #f 34)))))
+                                           (attr #f "b" (char-ref #f 34)))))
 
   (test-read "empty tag"
              "<test/>"
@@ -430,35 +439,26 @@
 DOC
     )
 
-  (test-case "sample document"
-             (define tokens
-               (call-with-input-string doc
-                 (lambda (in)
-                   (for/list ([token (in-port tokenize-xml in)])
-                     token))))
-             (check-equal?
-              tokens
-              (list
-               (start-tag #f #f "part" (list (attr #f "number" "1976")))
-               (char-data #f "\n    ")
-               (start-tag #f #f "name" '())
-               (char-data #f "Windscreen Wiper")
-               (end-tag #f "name")
-               (char-data #f "\n    ")
-               (start-tag #f #f "description" '())
-               (char-data
-                #f
-                (~a "\n      The Windscreen wiper automatically removes rain "
-                    "from your\n      windscreen, if it should happen to "
-                    "splash there.  It has a rubber\n      "))
-               (start-tag #f #f "ref" (list (attr #f "part" "1977")))
-               (char-data #f "blade")
-               (end-tag #f "ref")
-               (char-data
-                #f
-                (~a " which can be ordered separately if\n      you need to "
-                    "replace it.\n    "))
-               (end-tag #f "description")
-               (char-data #f "\n")
-               (end-tag #f "part"))))
-)
+  (test-read "sample document"
+    doc
+    #:reader tokenize-xml
+    (start-tag _ #f "part" (list (attr #f "number" "1976")))
+    (char-data _ "\n    ")
+    (start-tag _ #f "name" '())
+    (char-data _ "Windscreen Wiper")
+    (end-tag _ "name")
+    (char-data _ "\n    ")
+    (start-tag _ #f "description" '())
+    (char-data _
+               (== (~a "\n      The Windscreen wiper automatically removes rain "
+                       "from your\n      windscreen, if it should happen to "
+                       "splash there.  It has a rubber\n      ")))
+    (start-tag _ #f "ref" (list (attr #f "part" "1977")))
+    (char-data _ "blade")
+    (end-tag _ "ref")
+    (char-data _
+               (== (~a " which can be ordered separately if\n      you need to "
+                       "replace it.\n    ")))
+    (end-tag #f "description")
+    (char-data #f "\n")
+    (end-tag #f "part")))
