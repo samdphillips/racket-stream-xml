@@ -342,8 +342,20 @@
     (read-until (lambda (i buf) (scan v (string-ref buf i) (char=? q v))) in)
     (read-char in)))
 
-; FIXME:
-(define (read-pubid-literal in) #f)
+; FIXME: There are character restrictions for the content of the pubid
+(define (read-pubid-literal in) (read-system-literal in))
+
+(module+ test
+  (test-read "Reading PUBLIC externalId correctly"
+    "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">"
+    #:reader read-doctype
+      (doctype
+        #f
+        "html"
+        '(PUBLIC
+          "-//W3C//DTD XHTML 1.0 Transitional//EN"
+          "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd")
+        #f)))
 
 ; FIXME: parse parts of internal subset
 (define (read-internal-subset in)
