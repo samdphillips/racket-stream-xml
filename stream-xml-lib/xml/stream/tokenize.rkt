@@ -34,7 +34,7 @@
                [current-xml-special-readers (parameter/c list?)]
 
                [struct xml-token ([location source-location?])
-                       #:omit-constructor]
+                 #:omit-constructor]
 
                [struct char-data  ([location source-location?]
                                    [text     string?])]
@@ -71,17 +71,17 @@
                     call-with-input-string
                     with-output-to-string))
 
-  (define-simple-macro (test-read description:string
-                                  {~or input-string:string
-                                       input-string:expr}
-                                  {~optional {~seq #:reader reader}
-                                             #:defaults
-                                             [(reader #'read-content)]}
-                                  expected ...)
+  (define-syntax-parse-rule (test-read description:string
+                                       {~or input-string:string
+                                            input-string:expr}
+                                       {~optional {~seq #:reader reader}
+                                                  #:defaults
+                                                  [(reader #'read-content)]}
+                                       expected ...)
     (test-case description
       (call-with-input-string input-string
-        (lambda (in)
-          (check-match (reader in) expected) ...)))))
+                              (lambda (in)
+                                (check-match (reader in) expected) ...)))))
 
 (define use-case-sensitive-doctype? (make-parameter #t))
 
@@ -90,13 +90,13 @@
     (define buf (peek-string 1024 0 in))
     (define i (string-index buf '(#\< #\&)))
     (define (do-read-cdata size)
-      (let ([data (read-string size in)])
-        (char-data (source-location) data)))
+      (define data (read-string size in))
+      (char-data (source-location) data))
     (cond [(not i)   (do-read-cdata 1024)]
           [(zero? i) (read-special in)]
           [else      (do-read-cdata i)])))
 
-(define-simple-macro
+(define-syntax-parse-rule
   (define/read-special (name:id in:id args:id ...) test:id body ...)
   (define (name in args ...) (and (test in) (let () body ...))))
 
@@ -190,16 +190,16 @@
 
 (module+ test
   (test-read "check single entity references are attr-values"
-    "'&gt;'"
-    #:reader read-attr-value
-    (and (entity-ref _ "gt")
-         (? attr-value/c)))
+             "'&gt;'"
+             #:reader read-attr-value
+             (and (entity-ref _ "gt")
+                  (? attr-value/c)))
 
   (test-read "check single character references are attr-values"
-    "'&#10;'"
-    #:reader read-attr-value
-    (and (char-ref _ 10)
-         (? attr-value/c))))
+             "'&#10;'"
+             #:reader read-attr-value
+             (and (char-ref _ 10)
+                  (? attr-value/c))))
 
 (define (peek-reference? in)
   (scan v (peek-char in) (char=? #\& v)))
@@ -209,13 +209,13 @@
   (with-port-location (in source-location)
     (define (read-char-ref i base)
       (read-string i in)
-      (let ([s (read-until-semi)])
-        (char-ref (source-location) (string->number s base))))
+      (define chref (read-until-semi))
+      (char-ref (source-location) (string->number chref base)))
 
     (define (read-entity-ref)
       (read-char in)
-      (let ([s (read-until-semi)])
-        (entity-ref (source-location) s)))
+      (define ref (read-until-semi))
+      (entity-ref (source-location) ref))
 
     (define (read-until-semi)
       (begin0
@@ -277,9 +277,9 @@
              (lambda ()
                (for ([n 512]) (display "AbCd"))))])
     (test-read "long cdata"
-      (string-append "<![CDATA[" s "]]>")
-      #:reader read-cdata
-      (cdata _ (== s)))))
+               (string-append "<![CDATA[" s "]]>")
+               #:reader read-cdata
+               (cdata _ (== s)))))
 
 (define (peek-pi? in)
   (peek-string=? "<?" 0 in))
@@ -300,7 +300,7 @@
 
 (define (peek-doctype? in)
   (peek-string=? #:case-sensitive (use-case-sensitive-doctype?)
-                  "<!DOCTYPE" 0 in))
+                 "<!DOCTYPE" 0 in))
 
 (define/read-special (read-doctype in)
   peek-doctype?
@@ -325,9 +325,8 @@
         [else #f]))
     (skip-space in)
     (define internal-subset
-      (if (scan v (peek-char in 0) (char=? #\[ v))
-          (read-internal-subset in)
-          #f))
+      (and (scan v (peek-char in 0) (char=? #\[ v))
+           (read-internal-subset in)))
     (skip-space in)
     (expect-char 'read-doctype #\> in)
     (doctype (source-location) doc-name external-id internal-subset)))
@@ -347,15 +346,15 @@
 
 (module+ test
   (test-read "Reading PUBLIC externalId correctly"
-    "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">"
-    #:reader read-doctype
-      (doctype
-        #f
-        "html"
-        '(PUBLIC
-          "-//W3C//DTD XHTML 1.0 Transitional//EN"
-          "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd")
-        #f)))
+             "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">"
+             #:reader read-doctype
+             (doctype
+              #f
+              "html"
+              '(PUBLIC
+                "-//W3C//DTD XHTML 1.0 Transitional//EN"
+                "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd")
+              #f)))
 
 ; FIXME: parse parts of internal subset
 (define (read-internal-subset in)
@@ -366,13 +365,13 @@
 
 (define current-xml-special-readers
   (make-parameter
-    (list read-start-tag
-          read-end-tag
-          read-comment
-          read-reference
-          read-cdata
-          read-pi
-          read-doctype)))
+   (list read-start-tag
+         read-end-tag
+         read-comment
+         read-reference
+         read-cdata
+         read-pi
+         read-doctype)))
 
 (define (read-special in)
   (or (for/or ([read (in-list (current-xml-special-readers))]) (read in))
@@ -402,8 +401,8 @@
   (test-read "start tag with reference attributes"
              "<test a='A &amp; B' b=\"&#34;\">"
              (start-tag #f #f "test" (list (attr #f "a" (list "A "
-                                                        (entity-ref #f "amp")
-                                                        " B"))
+                                                              (entity-ref #f "amp")
+                                                              " B"))
                                            (attr #f "b" (char-ref #f 34)))))
 
   (test-read "empty tag"
@@ -452,25 +451,25 @@ DOC
     )
 
   (test-read "sample document"
-    doc
-    #:reader tokenize-xml
-    (start-tag _ #f "part" (list (attr #f "number" "1976")))
-    (char-data _ "\n    ")
-    (start-tag _ #f "name" '())
-    (char-data _ "Windscreen Wiper")
-    (end-tag _ "name")
-    (char-data _ "\n    ")
-    (start-tag _ #f "description" '())
-    (char-data _
-               (== (~a "\n      The Windscreen wiper automatically removes rain "
-                       "from your\n      windscreen, if it should happen to "
-                       "splash there.  It has a rubber\n      ")))
-    (start-tag _ #f "ref" (list (attr #f "part" "1977")))
-    (char-data _ "blade")
-    (end-tag _ "ref")
-    (char-data _
-               (== (~a " which can be ordered separately if\n      you need to "
-                       "replace it.\n    ")))
-    (end-tag #f "description")
-    (char-data #f "\n")
-    (end-tag #f "part")))
+             doc
+             #:reader tokenize-xml
+             (start-tag _ #f "part" (list (attr #f "number" "1976")))
+             (char-data _ "\n    ")
+             (start-tag _ #f "name" '())
+             (char-data _ "Windscreen Wiper")
+             (end-tag _ "name")
+             (char-data _ "\n    ")
+             (start-tag _ #f "description" '())
+             (char-data _
+                        (== (~a "\n      The Windscreen wiper automatically removes rain "
+                                "from your\n      windscreen, if it should happen to "
+                                "splash there.  It has a rubber\n      ")))
+             (start-tag _ #f "ref" (list (attr #f "part" "1977")))
+             (char-data _ "blade")
+             (end-tag _ "ref")
+             (char-data _
+                        (== (~a " which can be ordered separately if\n      you need to "
+                                "replace it.\n    ")))
+             (end-tag #f "description")
+             (char-data #f "\n")
+             (end-tag #f "part")))

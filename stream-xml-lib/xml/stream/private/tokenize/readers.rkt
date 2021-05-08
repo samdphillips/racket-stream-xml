@@ -99,8 +99,8 @@
           [(string? in) (lambda (amount start s)
                           (let* ([end (+ start amount)]
                                  [end
-                                   (let ([len (string-length s)])
-                                     (if (< end len) end len))])
+                                  (let ([len (string-length s)])
+                                    (if (< end len) end len))])
                             (substring s start end)))]
           [else
            (error 'peek-string=? "expected string or input-port got: ~a" in)]))
@@ -109,8 +109,8 @@
 
 (module+ test
   (check-not-exn
-    (lambda ()
-      (peek-string=? "abc" 0 "a"))))
+   (lambda ()
+     (peek-string=? "abc" 0 "a"))))
 
 (define (string-index s p*)
   (for/or ([c (in-string s)]
@@ -120,12 +120,12 @@
 
 (define (read-until pred? in [start 0])
   (let scan-out ([amount 1024])
-    (let ([buf (peek-string amount 0 in)])
-      (let scan ([i start])
-        (cond
-          [(> i amount)  (scan-out (+ amount 1024))]
-          [(pred? i buf) (read-string i in)]
-          [else (scan (add1 i))])))))
+    (define buf (peek-string amount 0 in))
+    (let scan ([i start])
+      (cond
+        [(> i amount)  (scan-out (+ amount 1024))]
+        [(pred? i buf) (read-string i in)]
+        [else (scan (add1 i))]))))
 
 (define (expect-next name
                      in
